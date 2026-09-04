@@ -137,7 +137,7 @@ where
     encoder.set_depth(png::BitDepth::Eight);
     // The framebuffer is sRGB, and saying so is the difference between an
     // image that matches the window and one that opens two stops too bright.
-    encoder.set_srgb(png::SrgbRenderingIntent::Perceptual);
+    encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
     encoder.write_header()?.write_image_data(&rows)?;
     Ok(())
 }

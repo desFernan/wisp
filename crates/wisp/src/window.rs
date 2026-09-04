@@ -238,10 +238,11 @@ impl<F: FnMut(&mut Ui, &Frame) -> Element> ApplicationHandler for App<F> {
                 is_synthetic,
                 ..
             } => {
-                if !is_synthetic && event.state == winit::event::ElementState::Pressed {
-                    if let Some(press) = translate(&event, self.modifiers) {
-                        self.ui.input(Input::Key(press));
-                    }
+                if !is_synthetic
+                    && event.state == winit::event::ElementState::Pressed
+                    && let Some(press) = translate(&event, self.modifiers)
+                {
+                    self.ui.input(Input::Key(press));
                 }
             }
             WindowEvent::Resized(size) => {
