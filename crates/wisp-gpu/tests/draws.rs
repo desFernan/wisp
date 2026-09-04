@@ -181,6 +181,26 @@ gpu_test!(a_solid_quad_lands_where_it_was_asked_to, h, {
     assert_eq!(at(&pixels, 14, 32)[3], 0, "one pixel outside the left edge");
 });
 
+gpu_test!(a_mid_tone_comes_out_the_colour_it_was_asked_for, h, {
+    // The test the first eight did not make. They were all written with pure
+    // colours -- 0x00 and 0xff -- which are the fixed points of the sRGB
+    // transfer function, so they pass whether or not the colours are
+    // linearised on the way to the GPU. Everything in between does not: the
+    // window rendered every mid-tone about twice as light as it should, and
+    // the whole suite stayed green.
+    let mut scene = Scene::new();
+    scene.push(Quad::new(
+        box_at(8.0, 8.0, 56.0, 56.0),
+        Background::Solid(Rgba::hex(0x808080)),
+    ));
+    let pixels = h.draw(&scene);
+    assert!(
+        close(at(&pixels, 32, 32), [128, 128, 128, 255]),
+        "{:?}",
+        at(&pixels, 32, 32)
+    );
+});
+
 gpu_test!(a_rounded_corner_is_cut_away_and_the_middle_is_not, h, {
     let mut scene = Scene::new();
     scene.push(

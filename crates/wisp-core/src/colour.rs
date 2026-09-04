@@ -51,6 +51,23 @@ impl Rgba {
         self.a <= 0.0
     }
 
+    /// The same colour with the sRGB transfer function undone.
+    ///
+    /// The channels of an `Rgba` are gamma-encoded, which is what a theme, a
+    /// designer and CSS all mean by a colour. A GPU writing into an sRGB
+    /// framebuffer does the encoding itself, so what a shader hands it has to
+    /// be linear -- passing the encoded values straight through brightens
+    /// everything, and does it invisibly for pure colours because 0 and 1 are
+    /// fixed points of the curve.
+    pub fn to_linear(self) -> Self {
+        Self {
+            r: to_linear(self.r),
+            g: to_linear(self.g),
+            b: to_linear(self.b),
+            a: self.a,
+        }
+    }
+
     /// `t` of the way from this colour to `other`, mixed in Oklab.
     ///
     /// Alpha is mixed straight: it is a coverage, not a colour, and it has no
@@ -185,6 +202,31 @@ mod tests {
         let clear = Rgba::hex(0xffffff).with_alpha(0.0);
         let solid = Rgba::hex(0xffffff).with_alpha(1.0);
         assert!(close(clear.mix(solid, 0.25).a, 0.25));
+    }
+
+    #[test]
+    fn pure_black_and_white_survive_linearising_unchanged() {
+        // Which is exactly why a missing conversion is easy to miss: they are
+        // the fixed points of the curve, so any test written with them passes
+        // either way.
+        assert_eq!(Rgba::hex(0x000000).to_linear().r, 0.0);
+        assert_eq!(Rgba::hex(0xffffff).to_linear().r, 1.0);
+    }
+
+    #[test]
+    fn a_mid_tone_gets_much_darker_when_it_is_linearised() {
+        // Mid grey is the case that shows it: 0x80 is a little over half in
+        // sRGB and a little under a quarter of the actual light.
+        let mid = Rgba::hex(0x808080);
+        assert!(close(mid.r, 0.502));
+        assert!(close(mid.to_linear().r, 0.216), "{}", mid.to_linear().r);
+    }
+
+    #[test]
+    fn linearising_leaves_alpha_alone() {
+        // It is coverage. There is no transfer function on how much of a thing
+        // there is.
+        assert_eq!(Rgba::hex(0x808080).with_alpha(0.4).to_linear().a, 0.4);
     }
 
     #[test]

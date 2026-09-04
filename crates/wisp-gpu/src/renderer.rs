@@ -32,7 +32,15 @@ struct GpuQuad {
     shadow_offset_and_gradient: [f32; 4],
 }
 
+/// Colours reach the shader linearised.
+///
+/// The surface is an sRGB format, so the hardware encodes whatever the
+/// fragment shader writes. Handing it the gamma-encoded values a theme is
+/// written in encodes them twice and every mid-tone in the window comes out
+/// pale -- and it does it silently for black and white, which are fixed points
+/// of the curve and therefore exactly what a first test gets written with.
 fn rgba(c: Rgba) -> [f32; 4] {
+    let c = c.to_linear();
     [c.r, c.g, c.b, c.a]
 }
 
@@ -263,11 +271,16 @@ impl Renderer {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: (clear.r * clear.a) as f64,
-                            g: (clear.g * clear.a) as f64,
-                            b: (clear.b * clear.a) as f64,
-                            a: clear.a as f64,
+                        // `wgpu::Color` is linear, and premultiplied to match
+                        // the blend the rest of the frame uses.
+                        load: wgpu::LoadOp::Clear({
+                            let c = clear.to_linear();
+                            wgpu::Color {
+                                r: (c.r * c.a) as f64,
+                                g: (c.g * c.a) as f64,
+                                b: (c.b * c.a) as f64,
+                                a: c.a as f64,
+                            }
                         }),
                         store: wgpu::StoreOp::Store,
                     },

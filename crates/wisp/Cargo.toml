@@ -1,0 +1,18 @@
+[package]
+name = "wisp"
+description = "A GPU user interface toolkit built around transparent, click-through, always-on-top windows."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+wisp-core.workspace = true
+wisp-gpu = { path = "../wisp-gpu", version = "0.0.1" }
+wgpu = "30"
+winit = "0.30"
+pollster = "0.4"
+
+[dev-dependencies]
+winit = "0.30"
