@@ -1,0 +1,10 @@
+[package]
+name = "wisp-core"
+description = "Geometry, colour and the display list wisp draws from. No GPU, no platform."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
