@@ -113,4 +113,4 @@ it should and the suite stayed green. That was found by looking at it.
 ## License
 
 MIT for the source. Not for artwork, fonts or audio distributed alongside it —
-see [LICENSE](LICENSE).
+see [LICENSE-ASSETS.md](LICENSE-ASSETS.md).
