@@ -59,25 +59,29 @@ impl<U: Copy + std::ops::Sub<Output = U>> Rect<U> {
     }
 }
 
+/// The four edges, for any unit -- including a plain `f32`, which is what
+/// texture coordinates are measured in.
+impl<U: Copy + std::ops::Add<Output = U>> Rect<U> {
+    pub fn left(&self) -> U {
+        self.origin.x
+    }
+
+    pub fn top(&self) -> U {
+        self.origin.y
+    }
+
+    pub fn right(&self) -> U {
+        self.origin.x + self.size.width
+    }
+
+    pub fn bottom(&self) -> U {
+        self.origin.y + self.size.height
+    }
+}
+
 macro_rules! rect_maths {
     ($unit:ty) => {
         impl Rect<$unit> {
-            pub fn left(&self) -> $unit {
-                self.origin.x
-            }
-
-            pub fn top(&self) -> $unit {
-                self.origin.y
-            }
-
-            pub fn right(&self) -> $unit {
-                self.origin.x + self.size.width
-            }
-
-            pub fn bottom(&self) -> $unit {
-                self.origin.y + self.size.height
-            }
-
             pub fn centre(&self) -> Point<$unit> {
                 Point::new(
                     self.origin.x + self.size.width / 2.0,

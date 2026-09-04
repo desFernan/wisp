@@ -9,5 +9,6 @@ mod window;
 pub use window::{Frame, WindowOptions, run};
 pub use wisp_core::colour::Rgba;
 pub use wisp_core::geometry::{Point, Rect, Size};
-pub use wisp_core::scene::{Background, Border, Corners, Quad, Scene, Shadow};
+pub use wisp_core::scene::{Background, Border, Corners, Masked, Quad, Scene, Shadow};
 pub use wisp_core::units::{DevicePixels, Points, Scale};
+pub use wisp_text::{Font, TextSystem, Weight};

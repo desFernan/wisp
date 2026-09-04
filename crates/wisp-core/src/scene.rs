@@ -235,10 +235,34 @@ impl Quad {
     }
 }
 
+/// A rectangle whose colour comes from a coverage mask rather than from a
+/// fill: one glyph, one icon, anything drawn from an atlas.
+///
+/// The mask is a single channel -- how much of the pixel the shape covers --
+/// and the colour is applied to it here. That is what lets one atlas serve
+/// text in any colour without being redrawn per colour, which is most of why a
+/// glyph cache is worth having.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Masked {
+    /// Where it goes, in device pixels. Fractional, like everything else: a
+    /// glyph snapped to a whole pixel is a line of text that jitters as it
+    /// scrolls.
+    pub bounds: Rect<DevicePixels>,
+    /// Where to read it from in the atlas, as 0..1 texture coordinates.
+    pub uv: Rect<f32>,
+    pub colour: Rgba,
+}
+
 /// One frame's worth of drawing, back to front.
+///
+/// Two lists rather than one, because they are two draw calls: everything with
+/// a fill, then everything read from the mask atlas. Text sits on top of the
+/// boxes it is written in, which is the order anything with a background
+/// wants, and it saves swapping pipelines per item.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Scene {
     quads: Vec<Quad>,
+    masked: Vec<Masked>,
 }
 
 impl Scene {
@@ -258,28 +282,46 @@ impl Scene {
         self
     }
 
+    /// Adds something drawn from the mask atlas, unless it is invisible.
+    pub fn push_masked(&mut self, masked: Masked) -> &mut Self {
+        if !masked.colour.is_transparent() && !masked.bounds.is_empty() {
+            self.masked.push(masked);
+        }
+        self
+    }
+
     pub fn quads(&self) -> &[Quad] {
         &self.quads
     }
 
+    pub fn masked(&self) -> &[Masked] {
+        &self.masked
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.quads.is_empty()
+        self.quads.is_empty() && self.masked.is_empty()
     }
 
     pub fn clear(&mut self) {
         self.quads.clear();
+        self.masked.clear();
     }
 
     /// Everything this scene will put pixels on, or `None` for an empty one.
     pub fn painted_bounds(&self) -> Option<Rect<DevicePixels>> {
-        self.quads.iter().map(Quad::painted_bounds).reduce(|a, b| {
-            Rect::from_edges(
-                a.left().min(b.left()),
-                a.top().min(b.top()),
-                a.right().max(b.right()),
-                a.bottom().max(b.bottom()),
-            )
-        })
+        let masked = self.masked.iter().map(|m| m.bounds);
+        self.quads
+            .iter()
+            .map(Quad::painted_bounds)
+            .chain(masked)
+            .reduce(|a, b| {
+                Rect::from_edges(
+                    a.left().min(b.left()),
+                    a.top().min(b.top()),
+                    a.right().max(b.right()),
+                    a.bottom().max(b.bottom()),
+                )
+            })
     }
 }
 

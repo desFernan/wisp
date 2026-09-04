@@ -8,13 +8,15 @@ with that content**, and is paced by the display rather than by a timer.
 The core underneath it is general purpose. The overlay case is what it is
 for.
 
-> **Status: early.** The renderer works and is tested. There is no text, no
-> layout and no input yet — see [Where this is](#where-this-is) before
-> depending on it.
+> **Status: early.** Drawing and text work and are tested. There is no layout,
+> no input and — the thing it is named for — no overlay yet. See
+> [Where this is](#where-this-is) before depending on it.
 
 ```sh
 cargo run --example cards -p wisp
 ```
+
+62 tests.
 
 ## Why another one
 
@@ -45,10 +47,10 @@ each of these bugs first:
 
 | | |
 |---|---|
-| geometry, colour, the display list | **done** — `wisp-core`, 34 tests, no GPU or platform in it |
-| the renderer: rounded rects, borders, gradients, shadows | **done** — one signed-distance field per quad, 9 tests that render and read the pixels back |
+| geometry, colour, the display list | **done** — `wisp-core`, no GPU or platform in it |
+| the renderer: rounded rects, borders, gradients, shadows, glyphs | **done** — one signed-distance field per quad, and a coverage atlas for everything cached. 12 tests render and read the pixels back |
 | a window, and a frame paced by the surface | **done** — `wisp::run` |
-| text | not started. It will be `swash` + `cosmic-text`; the shaper is not going to be written here |
+| text | **shaping, a glyph cache and an atlas** — `wisp-text`, on `cosmic-text` and `swash`. No shaper of its own and there will not be one |
 | layout | not started. `taffy` first, and something of its own only if taffy actually gets in the way |
 | input, focus, IME | not started. Hangul composition is a requirement rather than a later chore |
 | the overlay itself: click-through, hit masks, following its content | not started, and it is the whole point — everything above is the floor it needs |

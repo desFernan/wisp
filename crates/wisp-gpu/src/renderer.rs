@@ -48,6 +48,15 @@ fn px(v: DevicePixels) -> f32 {
     v.get()
 }
 
+/// One masked item, laid out to match `Masked` in `masked.wgsl`.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct GpuMasked {
+    bounds: [f32; 4],
+    uv: [f32; 4],
+    colour: [f32; 4],
+}
+
 /// What a renderer draws onto: a configured surface and its size.
 pub struct Surface<'window> {
     pub surface: wgpu::Surface<'window>,
@@ -60,6 +69,7 @@ pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
+    mask_pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     globals: wgpu::Buffer,
@@ -67,6 +77,10 @@ pub struct Renderer {
     quad_capacity: u64,
     gradients: wgpu::Texture,
     gradient_rows: u32,
+    masked: wgpu::Buffer,
+    masked_capacity: u64,
+    coverage: wgpu::Texture,
+    coverage_side: u32,
 }
 
 impl Renderer {
@@ -154,6 +168,36 @@ impl Renderer {
             cache: None,
         });
 
+        let mask_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("wisp masked"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("masked.wgsl").into()),
+        });
+        let mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wisp masked"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &mask_shader,
+                entry_point: Some("vertex"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &mask_shader,
+                entry_point: Some("fragment"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wisp globals"),
             size: size_of::<Globals>() as u64,
@@ -177,10 +221,16 @@ impl Renderer {
             ..Default::default()
         });
 
+        let masked_capacity = 512;
+        let masked = Self::masked_buffer(&device, masked_capacity);
+        let coverage_side = 1;
+        let coverage = Self::coverage_texture(&device, coverage_side);
+
         Self {
             device,
             queue,
             pipeline,
+            mask_pipeline,
             layout,
             sampler,
             globals,
@@ -188,6 +238,98 @@ impl Renderer {
             quad_capacity,
             gradients,
             gradient_rows,
+            masked,
+            masked_capacity,
+            coverage,
+            coverage_side,
+        }
+    }
+
+    fn masked_buffer(device: &wgpu::Device, capacity: u64) -> wgpu::Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wisp masked"),
+            size: capacity * size_of::<GpuMasked>() as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    }
+
+    fn coverage_texture(device: &wgpu::Device, side: u32) -> wgpu::Texture {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("wisp coverage"),
+            size: wgpu::Extent3d {
+                width: side,
+                height: side,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            // One channel: a glyph is a shape, and its colour is applied when
+            // it is drawn.
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        })
+    }
+
+    /// Hands the renderer the coverage atlas that masked items are read from.
+    ///
+    /// `dirty` is the region written since last time, so that a frame which
+    /// added one glyph does not re-send four megabytes. `None` sends nothing:
+    /// the atlas on the GPU is already what the caller has.
+    pub fn upload_coverage(
+        &mut self,
+        side: u32,
+        pixels: &[u8],
+        dirty: Option<(u32, u32, u32, u32)>,
+    ) {
+        if side != self.coverage_side {
+            self.coverage_side = side;
+            self.coverage = Self::coverage_texture(&self.device, side);
+            // A new texture has nothing in it, so the region that changed is
+            // all of it whatever the caller said.
+            self.write_coverage(pixels, (0, 0, side, side));
+            return;
+        }
+        if let Some(region) = dirty {
+            self.write_coverage(pixels, region);
+        }
+    }
+
+    fn write_coverage(&self, pixels: &[u8], (left, top, right, bottom): (u32, u32, u32, u32)) {
+        let (width, height) = (right.saturating_sub(left), bottom.saturating_sub(top));
+        if width == 0 || height == 0 {
+            return;
+        }
+        // Rows have to be contiguous for one write, and a sub-rectangle of the
+        // atlas is not, so the region is sent a row at a time. Text is added
+        // in bursts and then not at all, so this is not a per-frame cost.
+        for row in 0..height {
+            let from = ((top + row) * self.coverage_side + left) as usize;
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.coverage,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: left,
+                        y: top + row,
+                        z: 0,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &pixels[from..from + width as usize],
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width),
+                    rows_per_image: Some(1),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+            );
         }
     }
 
@@ -231,7 +373,54 @@ impl Renderer {
     /// is meant to show through wherever nothing was drawn.
     pub fn draw(&mut self, scene: &Scene, view: &wgpu::TextureView, size: (u32, u32), clear: Rgba) {
         let (quads, ramps) = self.encode(scene);
+        let masked: Vec<GpuMasked> = scene
+            .masked()
+            .iter()
+            .map(|m| GpuMasked {
+                bounds: [
+                    px(m.bounds.left()),
+                    px(m.bounds.top()),
+                    px(m.bounds.size.width),
+                    px(m.bounds.size.height),
+                ],
+                uv: [m.uv.left(), m.uv.top(), m.uv.right(), m.uv.bottom()],
+                colour: rgba(m.colour),
+            })
+            .collect();
         self.upload(&quads, &ramps, size);
+        if masked.len() as u64 > self.masked_capacity {
+            self.masked_capacity = (masked.len() as u64).next_power_of_two();
+            self.masked = Self::masked_buffer(&self.device, self.masked_capacity);
+        }
+        if !masked.is_empty() {
+            self.queue
+                .write_buffer(&self.masked, 0, bytemuck::cast_slice(&masked));
+        }
+
+        let mask_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("wisp masked"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.globals.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.masked.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(
+                        &self.coverage.create_view(&Default::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        });
 
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wisp quad"),
@@ -294,6 +483,15 @@ impl Renderer {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
                 pass.draw(0..6, 0..quads.len() as u32);
+            }
+            // Second, so that text sits on the boxes it is written in. Two
+            // passes rather than one sorted list: swapping pipelines per item
+            // costs more than the ordering is worth for an interface, where
+            // text is essentially always on top of its own background.
+            if !masked.is_empty() {
+                pass.set_pipeline(&self.mask_pipeline);
+                pass.set_bind_group(0, &mask_bind_group, &[]);
+                pass.draw(0..6, 0..masked.len() as u32);
             }
         }
         self.queue.submit([encoder.finish()]);

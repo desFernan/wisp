@@ -7,7 +7,7 @@
 //! only way to know is to draw and look, which is what this does.
 
 use wisp_core::geometry::Rect;
-use wisp_core::scene::{Background, Border, Corners, Quad, Shadow};
+use wisp_core::scene::{Background, Border, Corners, Masked, Quad, Shadow};
 use wisp_core::{DevicePixels, Rgba, Scene};
 use wisp_gpu::Renderer;
 
@@ -15,7 +15,7 @@ const SIZE: u32 = 64;
 /// The texture is read back as raw bytes and wgpu wants each row aligned.
 const ROW_ALIGN: u32 = 256;
 
-struct Harness {
+pub struct Harness {
     renderer: Renderer,
     target: wgpu::Texture,
     readback: wgpu::Buffer,
@@ -361,5 +361,91 @@ gpu_test!(quads_are_drawn_in_the_order_they_were_added, h, {
     assert!(
         close(at(&pixels, 32, 32), [0, 0, 255, 255]),
         "the later quad should be on top"
+    );
+});
+
+gpu_test!(a_mask_is_drawn_in_the_colour_it_was_given, h, {
+    // The coverage atlas holds a shape, not a picture: one channel saying how
+    // much of each pixel the shape covers. The colour comes from the item, so
+    // one cached glyph can serve text in every colour in a window.
+    //
+    // A four by four atlas, opaque on the left half and empty on the right.
+    let side = 4u32;
+    let mut atlas = vec![0u8; (side * side) as usize];
+    for row in 0..side {
+        for column in 0..side / 2 {
+            atlas[(row * side + column) as usize] = 255;
+        }
+    }
+    h.renderer
+        .upload_coverage(side, &atlas, Some((0, 0, side, side)));
+
+    let mut scene = Scene::new();
+    scene.push_masked(Masked {
+        bounds: box_at(0.0, 0.0, 64.0, 64.0),
+        uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
+        colour: Rgba::hex(0xff0000),
+    });
+    let pixels = h.draw(&scene);
+
+    assert!(
+        close(at(&pixels, 8, 32), [255, 0, 0, 255]),
+        "covered: {:?}",
+        at(&pixels, 8, 32)
+    );
+    assert_eq!(
+        at(&pixels, 56, 32)[3],
+        0,
+        "the empty half of the mask drew something"
+    );
+});
+
+gpu_test!(a_mask_is_drawn_over_the_quads_under_it, h, {
+    // Text sits on the box it is written in. Two passes, quads then masks,
+    // rather than one sorted list.
+    let side = 2u32;
+    h.renderer
+        .upload_coverage(side, &[255; 4], Some((0, 0, side, side)));
+
+    let mut scene = Scene::new();
+    scene.push(Quad::new(
+        box_at(0.0, 0.0, 64.0, 64.0),
+        Background::Solid(Rgba::hex(0x0000ff)),
+    ));
+    scene.push_masked(Masked {
+        bounds: box_at(16.0, 16.0, 48.0, 48.0),
+        uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
+        colour: Rgba::hex(0x00ff00),
+    });
+    let pixels = h.draw(&scene);
+
+    assert!(
+        close(at(&pixels, 32, 32), [0, 255, 0, 255]),
+        "the mask should be on top"
+    );
+    assert!(
+        close(at(&pixels, 4, 4), [0, 0, 255, 255]),
+        "the quad shows where the mask is not"
+    );
+});
+
+gpu_test!(a_half_covered_pixel_is_half_there, h, {
+    // The whole reason coverage is a value rather than a flag: without it
+    // every glyph edge is a staircase.
+    let side = 2u32;
+    h.renderer
+        .upload_coverage(side, &[128; 4], Some((0, 0, side, side)));
+
+    let mut scene = Scene::new();
+    scene.push_masked(Masked {
+        bounds: box_at(0.0, 0.0, 64.0, 64.0),
+        uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
+        colour: Rgba::hex(0xffffff),
+    });
+    let pixels = h.draw(&scene);
+    let alpha = at(&pixels, 32, 32)[3];
+    assert!(
+        (100..=155).contains(&alpha),
+        "half coverage came out as {alpha}"
     );
 });

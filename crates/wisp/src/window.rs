@@ -7,6 +7,7 @@ use winit::window::{Window, WindowId};
 
 use wisp_core::{Rgba, Scale, Scene};
 use wisp_gpu::Renderer;
+use wisp_text::TextSystem;
 
 /// What a window is asked for when it is opened.
 #[derive(Debug, Clone)]
@@ -52,7 +53,7 @@ pub struct Frame {
 /// against the refresh is what judder is.
 pub fn run<F>(options: WindowOptions, draw: F) -> Result<(), winit::error::EventLoopError>
 where
-    F: FnMut(&mut Scene, &Frame) + 'static,
+    F: FnMut(&mut Scene, &mut TextSystem, &Frame) + 'static,
 {
     let event_loop = EventLoop::new()?;
     // Poll, not Wait: something is animating in the sort of window this
@@ -65,6 +66,7 @@ where
         state: None,
         opened: std::time::Instant::now(),
         scene: Scene::new(),
+        text: TextSystem::new(),
     })
 }
 
@@ -81,9 +83,10 @@ struct App<F> {
     state: Option<State>,
     opened: std::time::Instant,
     scene: Scene,
+    text: TextSystem,
 }
 
-impl<F: FnMut(&mut Scene, &Frame)> App<F> {
+impl<F: FnMut(&mut Scene, &mut TextSystem, &Frame)> App<F> {
     fn open(&mut self, event_loop: &ActiveEventLoop) -> Option<State> {
         let attributes = Window::default_attributes()
             .with_title(self.options.title.clone())
@@ -143,7 +146,7 @@ impl<F: FnMut(&mut Scene, &Frame)> App<F> {
     }
 }
 
-impl<F: FnMut(&mut Scene, &Frame)> ApplicationHandler for App<F> {
+impl<F: FnMut(&mut Scene, &mut TextSystem, &Frame)> ApplicationHandler for App<F> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.state.is_none() {
             self.state = self.open(event_loop);
@@ -206,12 +209,21 @@ impl<F: FnMut(&mut Scene, &Frame)> ApplicationHandler for App<F> {
                 self.scene.clear();
                 (self.draw)(
                     &mut self.scene,
+                    &mut self.text,
                     &Frame {
                         size: (state.config.width, state.config.height),
                         scale,
                         elapsed: self.opened.elapsed().as_secs_f32(),
                     },
                 );
+                // Any glyph the frame asked for has been rasterised by now,
+                // so this is where the atlas and the GPU agree again. Only
+                // what changed is sent.
+                let atlas = self.text.atlas_mut();
+                let dirty = atlas.take_dirty();
+                let (side, pixels) = (atlas.side(), atlas.pixels().to_vec());
+                state.renderer.upload_coverage(side, &pixels, dirty);
+
                 let view = frame.texture.create_view(&Default::default());
                 state.renderer.draw(
                     &self.scene,

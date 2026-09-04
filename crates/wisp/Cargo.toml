@@ -10,6 +10,7 @@ authors.workspace = true
 [dependencies]
 wisp-core.workspace = true
 wisp-gpu = { path = "../wisp-gpu", version = "0.0.1" }
+wisp-text.workspace = true
 wgpu = "30"
 winit = "0.30"
 pollster = "0.4"
