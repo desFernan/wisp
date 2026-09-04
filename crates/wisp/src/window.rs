@@ -390,6 +390,11 @@ impl<F: FnMut(&mut Ui, &Frame) -> Element> ApplicationHandler for App<F> {
                 let dirty = atlas.take_dirty();
                 let (side, pixels) = (atlas.side(), atlas.pixels().to_vec());
                 state.renderer.upload_coverage(side, &pixels, dirty);
+                // The same for anything drawn from pixels.
+                let pictures = self.ui.pictures();
+                let dirty = pictures.take_dirty();
+                let (side, pixels) = (pictures.side(), pictures.pixels().to_vec());
+                state.renderer.upload_pictures(side, &pixels, dirty);
 
                 let view = surface_texture.texture.create_view(&Default::default());
                 state.renderer.draw(

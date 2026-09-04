@@ -8,12 +8,16 @@
 pub mod editor;
 pub mod element;
 pub mod input;
+pub mod pictures;
 pub mod theme;
 pub mod ui;
 
 pub use editor::{Editor, Preedit};
-pub use element::{Axis, Edges, Element, Id, Place, Sizing, column, div, row, spacer, text};
+pub use element::{
+    Axis, Edges, Element, Id, Place, Sizing, column, div, picture, row, spacer, text,
+};
 pub use input::{Composition, Input, Key, Press};
+pub use pictures::{Picture, Pictures};
 pub use theme::{Elevation, Role, Theme};
 pub use ui::{Interactions, Pointer, Ui};
 pub use wisp_text::Align;

@@ -493,3 +493,81 @@ gpu_test!(a_clip_cuts_a_mask_too, h, {
     assert!(at(&pixels, 16, 32)[3] > 0, "inside the clip");
     assert_eq!(at(&pixels, 48, 32)[3], 0, "outside it");
 });
+
+gpu_test!(a_picture_is_drawn_from_its_own_colours, h, {
+    // A two by two atlas: red, green on the top row; blue, white below.
+    let side = 2u32;
+    let pixels: Vec<u8> = [
+        [255u8, 0, 0, 255],
+        [0, 255, 0, 255],
+        [0, 0, 255, 255],
+        [255, 255, 255, 255],
+    ]
+    .concat();
+    h.renderer
+        .upload_pictures(side, &pixels, Some((0, 0, side, side)));
+
+    let mut scene = Scene::new();
+    scene.push_textured(wisp_core::Textured {
+        clip: None,
+        bounds: box_at(0.0, 0.0, 64.0, 64.0),
+        uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
+        tint: Rgba::hex(0xffffff),
+    });
+    let pixels = h.draw(&scene);
+
+    assert!(
+        close(at(&pixels, 8, 8), [255, 0, 0, 255]),
+        "top left: {:?}",
+        at(&pixels, 8, 8)
+    );
+    assert!(close(at(&pixels, 56, 8), [0, 255, 0, 255]), "top right");
+    assert!(close(at(&pixels, 8, 56), [0, 0, 255, 255]), "bottom left");
+});
+
+gpu_test!(a_tint_multiplies_into_the_picture, h, {
+    // What makes one white icon serve every colour it is needed in.
+    let side = 1u32;
+    h.renderer
+        .upload_pictures(side, &[255, 255, 255, 255], Some((0, 0, side, side)));
+
+    let mut scene = Scene::new();
+    scene.push_textured(wisp_core::Textured {
+        clip: None,
+        bounds: box_at(0.0, 0.0, 64.0, 64.0),
+        uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
+        tint: Rgba::hex(0xff0000),
+    });
+    let pixels = h.draw(&scene);
+    assert!(
+        close(at(&pixels, 32, 32), [255, 0, 0, 255]),
+        "{:?}",
+        at(&pixels, 32, 32)
+    );
+});
+
+gpu_test!(a_transparent_pixel_in_a_picture_stays_transparent, h, {
+    // A sprite is drawn on a transparent canvas, and the canvas has to stay
+    // transparent or the character is a rectangle.
+    let side = 2u32;
+    let pixels: Vec<u8> = [
+        [255u8, 255, 255, 255],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+    ]
+    .concat();
+    h.renderer
+        .upload_pictures(side, &pixels, Some((0, 0, side, side)));
+
+    let mut scene = Scene::new();
+    scene.push_textured(wisp_core::Textured {
+        clip: None,
+        bounds: box_at(0.0, 0.0, 64.0, 64.0),
+        uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
+        tint: Rgba::hex(0xffffff),
+    });
+    let pixels = h.draw(&scene);
+    assert!(at(&pixels, 8, 8)[3] > 200, "the opaque quarter");
+    assert_eq!(at(&pixels, 56, 56)[3], 0, "the empty quarter");
+});

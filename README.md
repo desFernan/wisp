@@ -62,6 +62,7 @@ each of these bugs first:
 | pointer input | **done** — hover, press and click, hit-tested against the frame that was drawn. A click is a press and a release on the same box, so sliding off one and letting go cancels |
 | text entry, focus, IME | **done** — a grapheme-aware editor, click to focus, and composition through the system's input method, so Korean, Japanese and Chinese all work without this library composing anything itself |
 | scrolling | **done** — a box that keeps its size, cuts what reaches past it, and takes the wheel from whichever scrolling box the pointer is over |
+| pictures | **done** — an atlas for avatars, icons and sprites, tinted on the way out so one white icon serves every colour |
 | the overlay: transparent, always on top, click-through per pixel | **done** on macOS — `wisp-overlay`, with a selftest that asks the window server rather than reading back its own flags |
 
 The milestone that decides whether any of this worked is porting a real desktop

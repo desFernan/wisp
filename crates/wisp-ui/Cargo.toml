@@ -11,4 +11,6 @@ authors.workspace = true
 wisp-core.workspace = true
 wisp-text.workspace = true
 unicode-segmentation = "1"
+etagere = "0.3"
+png = "0.17"
 taffy = { version = "0.14", default-features = false, features = ["std", "flexbox", "taffy_tree"] }

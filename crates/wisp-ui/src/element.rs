@@ -139,6 +139,7 @@ pub struct Element {
     pub(crate) id: Option<Id>,
     pub(crate) style: Style,
     pub(crate) label: Option<Label>,
+    pub(crate) picture: Option<(crate::pictures::Picture, Rgba)>,
     pub(crate) children: Vec<Element>,
 }
 
@@ -148,8 +149,19 @@ pub fn div() -> Element {
         id: None,
         style: Style::default(),
         label: None,
+        picture: None,
         children: Vec::new(),
     }
+}
+
+/// A picture, at its own size unless told otherwise.
+///
+/// Untinted, which for a picture means white: the tint is multiplied in, so
+/// white leaves the colours alone and anything else stains them.
+pub fn picture(picture: crate::pictures::Picture) -> Element {
+    let mut element = div();
+    element.picture = Some((picture, Rgba::hex(0xffffff)));
+    element
 }
 
 /// A box laid out left to right, with its children centred across it.
@@ -305,6 +317,15 @@ impl Element {
     pub fn align(mut self, align: wisp_text::Align) -> Self {
         if let Some(label) = self.label.as_mut() {
             label.align = align;
+        }
+        self
+    }
+
+    /// Multiplied into a picture. One white icon serves every colour it is
+    /// needed in.
+    pub fn tint(mut self, colour: Rgba) -> Self {
+        if let Some((_, tint)) = self.picture.as_mut() {
+            *tint = colour;
         }
         self
     }

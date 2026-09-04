@@ -82,6 +82,11 @@ where
     let dirty = atlas.take_dirty();
     let (side, pixels) = (atlas.side(), atlas.pixels().to_vec());
     renderer.upload_coverage(side, &pixels, dirty);
+    // The same for anything drawn from pixels.
+    let pictures = ui.pictures();
+    let dirty = pictures.take_dirty();
+    let (side, pixels) = (pictures.side(), pictures.pixels().to_vec());
+    renderer.upload_pictures(side, &pixels, dirty);
 
     let view = target.create_view(&Default::default());
     renderer.draw(&scene, &view, (width, height), clear);

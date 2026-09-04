@@ -2900,6 +2900,8 @@ dependencies = [
 name = "wisp-ui"
 version = "0.0.1"
 dependencies = [
+ "etagere",
+ "png",
  "taffy",
  "unicode-segmentation",
  "wisp-core",

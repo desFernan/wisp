@@ -72,6 +72,7 @@ impl Interactions {
 /// time.
 pub struct Ui {
     text: TextSystem,
+    pictures: crate::pictures::Pictures,
     pointer: Pointer,
     was_down: bool,
     pressed_on: Option<Id>,
@@ -89,6 +90,9 @@ pub struct Ui {
     scrolls: HashMap<Id, f32>,
     /// Wheel movement since the last frame, in points.
     wheel: f32,
+    /// The display scale of the frame being built, so that a picture can be
+    /// measured at its own pixels while everything else is in points.
+    scale: f32,
     /// Whether a click finished this frame, wherever it landed.
     ///
     /// Not the same question as which box was clicked: most of a window is
@@ -107,6 +111,7 @@ impl Ui {
     pub fn new() -> Self {
         Self {
             text: TextSystem::new(),
+            pictures: crate::pictures::Pictures::default(),
             pointer: Pointer::default(),
             was_down: false,
             pressed_on: None,
@@ -118,11 +123,17 @@ impl Ui {
             scrolls: HashMap::new(),
             wheel: 0.0,
             released: false,
+            scale: 1.0,
         }
     }
 
     pub fn text(&mut self) -> &mut TextSystem {
         &mut self.text
+    }
+
+    /// Everything drawn from pixels: avatars, icons, sprites.
+    pub fn pictures(&mut self) -> &mut crate::pictures::Pictures {
+        &mut self.pictures
     }
 
     /// What the pointer did to the frame before this one.
@@ -187,6 +198,7 @@ impl Ui {
         scale: Scale,
         scene: &mut Scene,
     ) -> Interactions {
+        self.scale = scale.factor();
         let mut tree: TaffyTree<Label> = TaffyTree::new();
         // Nothing here is rounded to whole points. This is a library whose
         // argument is that positions are fractional, and a layout engine
@@ -314,6 +326,19 @@ impl Ui {
                 .new_leaf_with_context(style, label.clone())
                 .expect("a leaf is always makeable");
         }
+        if let Some((picture, _)) = element.picture {
+            // Its own size unless the caller said otherwise. Measured here
+            // rather than through the callback: a picture's size is known and
+            // does not depend on how much room it is given.
+            let mut style = style;
+            if matches!(element.style.width, Sizing::Hug) {
+                style.size.width = Dimension::length(picture.size.0 as f32 / self.scale);
+            }
+            if matches!(element.style.height, Sizing::Hug) {
+                style.size.height = Dimension::length(picture.size.1 as f32 / self.scale);
+            }
+            return tree.new_leaf(style).expect("a leaf is always makeable");
+        }
         let children: Vec<NodeId> = element
             .children
             .iter()
@@ -398,6 +423,20 @@ impl Ui {
                 quad = quad.with_shadow(shadow);
             }
             scene.push(quad.clipped_to(device_clip));
+        }
+
+        if let Some((picture, tint)) = element.picture {
+            scene.push_textured(wisp_core::scene::Textured {
+                clip: device_clip,
+                bounds: Rect::from_edges(
+                    DevicePixels(bounds.left() * scale.factor()),
+                    DevicePixels(bounds.top() * scale.factor()),
+                    DevicePixels(bounds.right() * scale.factor()),
+                    DevicePixels(bounds.bottom() * scale.factor()),
+                ),
+                uv: picture.uv,
+                tint,
+            });
         }
 
         if let Some(label) = element.label.as_ref() {

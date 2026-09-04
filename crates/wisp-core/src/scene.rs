@@ -304,6 +304,24 @@ fn outside_corner(quad: &Quad, point: Point<DevicePixels>) -> bool {
     beyond_x && beyond_y && (dx * dx + dy * dy) > radius * radius
 }
 
+/// A rectangle filled from a picture rather than from a colour.
+///
+/// The mask atlas holds shapes -- one channel, coloured when drawn -- and this
+/// is for the things that are not shapes: an avatar, an icon that is a
+/// drawing, a character's sprite.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Textured {
+    pub clip: Option<Rect<DevicePixels>>,
+    /// Fractional, like everything else. A sprite that can only be placed on
+    /// whole pixels cannot move smoothly, which is the whole argument.
+    pub bounds: Rect<DevicePixels>,
+    /// Where to read it from, as 0..1 texture coordinates.
+    pub uv: Rect<f32>,
+    /// Multiplied into the picture. White leaves it alone; anything else
+    /// tints it, and the alpha fades it.
+    pub tint: Rgba,
+}
+
 /// One frame's worth of drawing, back to front.
 ///
 /// Two lists rather than one, because they are two draw calls: everything with
@@ -314,6 +332,7 @@ fn outside_corner(quad: &Quad, point: Point<DevicePixels>) -> bool {
 pub struct Scene {
     quads: Vec<Quad>,
     masked: Vec<Masked>,
+    textured: Vec<Textured>,
 }
 
 impl Scene {
@@ -357,13 +376,29 @@ impl Scene {
         &self.masked
     }
 
+    /// Adds a picture, unless it is invisible or entirely clipped away.
+    pub fn push_textured(&mut self, textured: Textured) -> &mut Self {
+        let clipped_away = textured
+            .clip
+            .is_some_and(|clip| !textured.bounds.intersects(&clip));
+        if !textured.tint.is_transparent() && !textured.bounds.is_empty() && !clipped_away {
+            self.textured.push(textured);
+        }
+        self
+    }
+
+    pub fn textured(&self) -> &[Textured] {
+        &self.textured
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.quads.is_empty() && self.masked.is_empty()
+        self.quads.is_empty() && self.masked.is_empty() && self.textured.is_empty()
     }
 
     pub fn clear(&mut self) {
         self.quads.clear();
         self.masked.clear();
+        self.textured.clear();
     }
 
     /// Whether anything solid was drawn at this point.
@@ -402,6 +437,15 @@ impl Scene {
                 solid(&masked.colour)
                     && masked.bounds.contains(point)
                     && !masked.clip.is_some_and(|clip| !clip.contains(point))
+            })
+            // A picture's own transparency is not known here -- the pixels are
+            // on the GPU. Its rectangle counts, which is right for an icon and
+            // generous for a sprite drawn on a transparent canvas; a caller
+            // that needs the difference gives the sprite a tighter box.
+            || self.textured.iter().any(|textured| {
+                solid(&textured.tint)
+                    && textured.bounds.contains(point)
+                    && !textured.clip.is_some_and(|clip| !clip.contains(point))
             })
     }
 

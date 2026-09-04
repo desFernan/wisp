@@ -12,5 +12,5 @@ pub mod units;
 
 pub use colour::Rgba;
 pub use geometry::{Point, Rect, Size};
-pub use scene::{Background, Border, Corners, Masked, Quad, Scene, Shadow};
+pub use scene::{Background, Border, Corners, Masked, Quad, Scene, Shadow, Textured};
 pub use units::{DevicePixels, Points, Scale};
