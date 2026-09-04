@@ -110,6 +110,28 @@ impl TextSystem {
         &mut self.atlas
     }
 
+    /// How much room `text` would take, without drawing it.
+    ///
+    /// Shapes and throws the result away, which is what layout needs: a box
+    /// has to be sized before there is anywhere to draw into. Glyphs are
+    /// cached either way, so the shaping is not paid for twice.
+    pub fn measure(
+        &mut self,
+        text: &str,
+        font: &Font,
+        wrap: Option<DevicePixels>,
+    ) -> (DevicePixels, DevicePixels) {
+        let mut nowhere = Scene::new();
+        self.draw(
+            &mut nowhere,
+            text,
+            font,
+            Point::new(DevicePixels::ZERO, DevicePixels::ZERO),
+            wrap,
+            Rgba::TRANSPARENT,
+        )
+    }
+
     /// Lays `text` out into `scene`, with `at` as the top left of the first
     /// line, and returns how much room it took.
     ///

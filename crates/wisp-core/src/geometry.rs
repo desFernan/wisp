@@ -60,7 +60,18 @@ impl<U: Copy + std::ops::Sub<Output = U>> Rect<U> {
 }
 
 /// The four edges, for any unit -- including a plain `f32`, which is what
-/// texture coordinates are measured in.
+/// texture coordinates and hit testing are measured in.
+impl<U: Copy + std::ops::Add<Output = U> + PartialOrd> Rect<U> {
+    /// Half-open on the right and bottom, so two rectangles laid edge to edge
+    /// do not both claim the line between them.
+    pub fn contains(&self, point: Point<U>) -> bool {
+        point.x >= self.left()
+            && point.x < self.right()
+            && point.y >= self.top()
+            && point.y < self.bottom()
+    }
+}
+
 impl<U: Copy + std::ops::Add<Output = U>> Rect<U> {
     pub fn left(&self) -> U {
         self.origin.x
@@ -87,15 +98,6 @@ macro_rules! rect_maths {
                     self.origin.x + self.size.width / 2.0,
                     self.origin.y + self.size.height / 2.0,
                 )
-            }
-
-            /// Half-open on the right and bottom, so two rectangles laid edge
-            /// to edge do not both claim the line between them.
-            pub fn contains(&self, point: Point<$unit>) -> bool {
-                point.x >= self.left()
-                    && point.x < self.right()
-                    && point.y >= self.top()
-                    && point.y < self.bottom()
             }
 
             pub fn intersects(&self, other: &Self) -> bool {

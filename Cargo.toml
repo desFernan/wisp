@@ -12,3 +12,4 @@ authors = ["desFernan"]
 [workspace.dependencies]
 wisp-core = { path = "crates/wisp-core", version = "0.0.1" }
 wisp-text = { path = "crates/wisp-text", version = "0.0.1" }
+wisp-ui = { path = "crates/wisp-ui", version = "0.0.1" }

@@ -11,9 +11,15 @@ authors.workspace = true
 wisp-core.workspace = true
 wisp-gpu = { path = "../wisp-gpu", version = "0.0.1" }
 wisp-text.workspace = true
+wisp-ui.workspace = true
 wgpu = "30"
 winit = "0.30"
 pollster = "0.4"
+raw-window-handle = "0.6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSResponder"] }
 
 [dev-dependencies]
 winit = "0.30"

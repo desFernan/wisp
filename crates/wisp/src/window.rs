@@ -7,7 +7,7 @@ use winit::window::{Window, WindowId};
 
 use wisp_core::{Rgba, Scale, Scene};
 use wisp_gpu::Renderer;
-use wisp_text::TextSystem;
+use wisp_ui::{Element, Pointer, Ui};
 
 /// What a window is asked for when it is opened.
 #[derive(Debug, Clone)]
@@ -46,14 +46,18 @@ pub struct Frame {
 
 /// Opens a window and draws it until it is closed.
 ///
-/// `draw` is handed an empty scene each frame and fills it. It is called on the
-/// presenting thread, paced by the surface: [`wgpu::PresentMode::AutoVsync`]
-/// blocks until the display is ready for the next frame, so the loop runs at
-/// the refresh rate rather than against a clock of its own. A timer beating
-/// against the refresh is what judder is.
-pub fn run<F>(options: WindowOptions, draw: F) -> Result<(), winit::error::EventLoopError>
+/// `build` is called once per frame and returns the tree for that frame. It is
+/// laid out, painted and hit-tested here; what the pointer did to the previous
+/// frame is available from the [`Ui`] while the next one is being built, which
+/// is what makes a button that has no state of its own possible.
+///
+/// The loop is paced by the surface. [`wgpu::PresentMode::AutoVsync`] blocks
+/// until the display is ready, so frames come at the refresh rate rather than
+/// against a clock of this library's own -- a timer beating against the
+/// refresh is what judder is.
+pub fn run<F>(options: WindowOptions, build: F) -> Result<(), winit::error::EventLoopError>
 where
-    F: FnMut(&mut Scene, &mut TextSystem, &Frame) + 'static,
+    F: FnMut(&mut Ui, &Frame) -> Element + 'static,
 {
     let event_loop = EventLoop::new()?;
     // Poll, not Wait: something is animating in the sort of window this
@@ -62,11 +66,12 @@ where
     event_loop.set_control_flow(ControlFlow::Poll);
     event_loop.run_app(&mut App {
         options,
-        draw,
+        build,
         state: None,
         opened: std::time::Instant::now(),
         scene: Scene::new(),
-        text: TextSystem::new(),
+        ui: Ui::new(),
+        pointer: Pointer::default(),
     })
 }
 
@@ -79,14 +84,15 @@ struct State {
 
 struct App<F> {
     options: WindowOptions,
-    draw: F,
+    build: F,
     state: Option<State>,
     opened: std::time::Instant,
     scene: Scene,
-    text: TextSystem,
+    ui: Ui,
+    pointer: Pointer,
 }
 
-impl<F: FnMut(&mut Scene, &mut TextSystem, &Frame)> App<F> {
+impl<F: FnMut(&mut Ui, &Frame) -> Element> App<F> {
     fn open(&mut self, event_loop: &ActiveEventLoop) -> Option<State> {
         let attributes = Window::default_attributes()
             .with_title(self.options.title.clone())
@@ -137,6 +143,7 @@ impl<F: FnMut(&mut Scene, &mut TextSystem, &Frame)> App<F> {
         };
         surface.configure(&device, &config);
 
+        crate::diagnostics::announce_window_id(&window);
         Some(State {
             window,
             surface,
@@ -146,7 +153,7 @@ impl<F: FnMut(&mut Scene, &mut TextSystem, &Frame)> App<F> {
     }
 }
 
-impl<F: FnMut(&mut Scene, &mut TextSystem, &Frame)> ApplicationHandler for App<F> {
+impl<F: FnMut(&mut Ui, &Frame) -> Element> ApplicationHandler for App<F> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.state.is_none() {
             self.state = self.open(event_loop);
@@ -181,6 +188,27 @@ impl<F: FnMut(&mut Scene, &mut TextSystem, &Frame)> ApplicationHandler for App<F
         };
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            // Kept in points, which is what layout and hit testing are in.
+            WindowEvent::CursorMoved { position, .. } => {
+                let scale = state.window.scale_factor() as f32;
+                self.pointer.at = (position.x as f32 / scale, position.y as f32 / scale);
+            }
+            WindowEvent::MouseInput {
+                state: pressed,
+                button,
+                ..
+            } => {
+                if button == winit::event::MouseButton::Left {
+                    self.pointer.down = pressed == winit::event::ElementState::Pressed;
+                }
+            }
+            // A pointer that has left cannot be over anything. Without this the
+            // last thing it was over stays lit for as long as the window is
+            // open, which is the kind of detail that makes an interface feel
+            // dead.
+            WindowEvent::CursorLeft { .. } => {
+                self.pointer.at = (f32::MIN, f32::MIN);
+            }
             WindowEvent::Resized(size) => {
                 state.config.width = size.width.max(1);
                 state.config.height = size.height.max(1);
@@ -189,7 +217,7 @@ impl<F: FnMut(&mut Scene, &mut TextSystem, &Frame)> ApplicationHandler for App<F
                     .configure(state.renderer.device(), &state.config);
             }
             WindowEvent::RedrawRequested => {
-                let frame = match state.surface.get_current_texture() {
+                let surface_texture = match state.surface.get_current_texture() {
                     wgpu::CurrentSurfaceTexture::Success(texture) => texture,
                     // Nothing is visible, so nothing is worth drawing. Coming
                     // back next frame is the whole handling.
@@ -207,24 +235,27 @@ impl<F: FnMut(&mut Scene, &mut TextSystem, &Frame)> ApplicationHandler for App<F
                 };
                 let scale = Scale::new(state.window.scale_factor() as f32).unwrap_or(Scale::ONE);
                 self.scene.clear();
-                (self.draw)(
-                    &mut self.scene,
-                    &mut self.text,
-                    &Frame {
-                        size: (state.config.width, state.config.height),
-                        scale,
-                        elapsed: self.opened.elapsed().as_secs_f32(),
-                    },
+                self.ui.point(self.pointer);
+                let frame = Frame {
+                    size: (state.config.width, state.config.height),
+                    scale,
+                    elapsed: self.opened.elapsed().as_secs_f32(),
+                };
+                let root = (self.build)(&mut self.ui, &frame);
+                let in_points = (
+                    state.config.width as f32 / scale.factor(),
+                    state.config.height as f32 / scale.factor(),
                 );
+                self.ui.frame(&root, in_points, scale, &mut self.scene);
                 // Any glyph the frame asked for has been rasterised by now,
                 // so this is where the atlas and the GPU agree again. Only
                 // what changed is sent.
-                let atlas = self.text.atlas_mut();
+                let atlas = self.ui.text().atlas_mut();
                 let dirty = atlas.take_dirty();
                 let (side, pixels) = (atlas.side(), atlas.pixels().to_vec());
                 state.renderer.upload_coverage(side, &pixels, dirty);
 
-                let view = frame.texture.create_view(&Default::default());
+                let view = surface_texture.texture.create_view(&Default::default());
                 state.renderer.draw(
                     &self.scene,
                     &view,
@@ -233,7 +264,7 @@ impl<F: FnMut(&mut Scene, &mut TextSystem, &Frame)> ApplicationHandler for App<F
                 );
                 // Presented before the next frame is asked for, so that the
                 // request lands after the surface has had this one.
-                state.renderer.queue().present(frame);
+                state.renderer.queue().present(surface_texture);
             }
             _ => {}
         }

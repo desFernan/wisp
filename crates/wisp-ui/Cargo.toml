@@ -1,0 +1,13 @@
+[package]
+name = "wisp-ui"
+description = "Layout, input and a design system for wisp."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+wisp-core.workspace = true
+wisp-text.workspace = true
+taffy = { version = "0.14", default-features = false, features = ["std", "flexbox", "taffy_tree"] }

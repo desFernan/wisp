@@ -8,12 +8,14 @@ with that content**, and is paced by the display rather than by a timer.
 The core underneath it is general purpose. The overlay case is what it is
 for.
 
-> **Status: early.** Drawing and text work and are tested. There is no layout,
-> no input and — the thing it is named for — no overlay yet. See
+> **Status: early.** You can build a window with it: layout, text, pointer
+> input and a design system all work and are tested. There is no text *entry*
+> yet, no scrolling, and — the thing it is named for — no overlay. See
 > [Where this is](#where-this-is) before depending on it.
 
 ```sh
-cargo run --example cards -p wisp
+cargo run --example chat -p wisp      # a chat window, built out of the toolkit
+cargo run --example gallery -p wisp   # the type scale and the surface ramp
 ```
 
 62 tests.
@@ -51,8 +53,11 @@ each of these bugs first:
 | the renderer: rounded rects, borders, gradients, shadows, glyphs | **done** — one signed-distance field per quad, and a coverage atlas for everything cached. 12 tests render and read the pixels back |
 | a window, and a frame paced by the surface | **done** — `wisp::run` |
 | text | **shaping, a glyph cache and an atlas** — `wisp-text`, on `cosmic-text` and `swash`. No shaper of its own and there will not be one |
-| layout | not started. `taffy` first, and something of its own only if taffy actually gets in the way |
-| input, focus, IME | not started. Hangul composition is a requirement rather than a later chore |
+| layout | **done** — flexbox on `taffy`, with `Fill` meaning *the space that is left* along an axis and *all of it* across one, which is the distinction a sidebar beside a pane lives or dies on |
+| a design system | **done** — a named type scale and surface ramp, with tests that neighbouring steps stay far enough apart to be seen. Most toolkits leave this to the application and most applications never get to it |
+| pointer input | **done** — hover, press and click, hit-tested against the frame that was drawn. A click is a press and a release on the same box, so sliding off one and letting go cancels |
+| text entry, focus, IME | not started, and the hardest thing left. Hangul composition is a requirement rather than a later chore |
+| scrolling | not started |
 | the overlay itself: click-through, hit masks, following its content | not started, and it is the whole point — everything above is the floor it needs |
 
 The milestone that decides whether any of this worked is porting a real desktop
@@ -65,27 +70,44 @@ around it".
 |---|---|---|
 | `wisp-core` | geometry, colour, the display list | nothing |
 | `wisp-gpu` | the wgpu renderer | `wisp-core`, `wgpu` |
-| `wisp` | the window, and the umbrella re-export | both |
+| `wisp-text` | shaping, rasterising, the glyph atlas | `wisp-core`, `cosmic-text` |
+| `wisp-ui` | layout, pointer input, the design system | `wisp-core`, `wisp-text`, `taffy` |
+| `wisp` | the window, and the umbrella re-export | all of them |
 
 `wisp-core` has no GPU and no platform in it, which is why nearly every test
 can run anywhere and in milliseconds.
 
-## Drawing
+## Building a window
 
 ```rust
-use wisp::{Background, Corners, Points, Quad, Rect, Rgba, WindowOptions, run};
+use wisp::{Edges, Elevation, Role, Sizing, Theme, Ui, WindowOptions, column, row, text};
 
-run(WindowOptions::default(), |scene, frame| {
-    let px = |v: f32| Points(v).to_device(frame.scale);
-    scene.push(
-        Quad::new(
-            Rect::from_edges(px(40.0), px(40.0), px(280.0), px(190.0)),
-            Background::Solid(Rgba::hex(0x1c1c24)),
+let theme = Theme::dark();
+wisp::run(WindowOptions::default(), move |ui: &mut Ui, _frame| {
+    if ui.last().clicked("send") {
+        // ...
+    }
+    column()
+        .size(Sizing::Fill, Sizing::Fill)
+        .padding(Edges::all(24.0))
+        .gap(12.0)
+        .background(theme.base)
+        .child(text("Say something", Role::Title, theme.ink))
+        .child(
+            row()
+                .padding(Edges::axes(8.0, 16.0))
+                .corners(8.0)
+                .background(theme.accent)
+                .id("send")
+                .child(text("Send", Role::Label, theme.on_accent)),
         )
-        .with_corners(Corners::all(px(12.0))),
-    );
 })
 ```
+
+The tree is rebuilt every frame and nothing in it remembers anything. A button
+is a box with a name; whether it was clicked is a question about the frame that
+has already been drawn. There is no widget state to keep in step with the
+application's own, which is the bug retained toolkits spend their lives on.
 
 A rounded rectangle with a border and a shadow is one primitive, evaluated
 once. Drawing a box and then its border as two quads is where the seam between

@@ -4,6 +4,7 @@
 //! the library needs one dependency, and adds the part that has to touch a
 //! platform.
 
+mod diagnostics;
 mod window;
 
 pub use window::{Frame, WindowOptions, run};
@@ -12,3 +13,5 @@ pub use wisp_core::geometry::{Point, Rect, Size};
 pub use wisp_core::scene::{Background, Border, Corners, Masked, Quad, Scene, Shadow};
 pub use wisp_core::units::{DevicePixels, Points, Scale};
 pub use wisp_text::{Font, TextSystem, Weight};
+pub use wisp_ui::element::{Axis, Edges, Element, Place, Sizing, column, div, row, spacer, text};
+pub use wisp_ui::{Elevation, Interactions, Pointer, Role, Theme, Ui};
