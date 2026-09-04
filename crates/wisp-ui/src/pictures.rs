@@ -133,7 +133,9 @@ impl Pictures {
         let rgba = match info.color_type {
             png::ColorType::Rgba => buffer[..info.buffer_size()].to_vec(),
             png::ColorType::Rgb => buffer[..info.buffer_size()]
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .flat_map(|p| [p[0], p[1], p[2], 255])
                 .collect(),
             // Anything else -- palettes, greyscale, sixteen bits -- would need
