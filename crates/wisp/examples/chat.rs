@@ -8,7 +8,8 @@
 //! Run with `cargo run --example chat`.
 
 use wisp::{
-    Edges, Element, Elevation, Role, Sizing, Theme, Ui, WindowOptions, column, row, spacer, text,
+    Edges, Editor, Element, Elevation, OnEnter, Role, Sizing, Theme, Ui, WindowOptions, column,
+    row, spacer, text,
 };
 
 const SIDEBAR: f32 = 224.0;
@@ -18,30 +19,32 @@ const STATUS_BAR: f32 = 28.0;
 /// the transcript is capped and centred rather than run across the window.
 const READING: f32 = 720.0;
 
-struct Message {
-    from: &'static str,
-    body: &'static str,
+pub struct Message {
+    pub from: String,
+    pub body: String,
 }
 
-const TRANSCRIPT: &[Message] = &[
-    Message {
-        from: "you",
-        body: "왜 라이트 테마에서 카드가 안 보였어?",
-    },
-    Message {
-        from: "puck",
-        body: "raised 와 floating 이 둘 다 흰색이었습니다. 밝은 테마는 위로 갈수록 흰색에 \
-               가까워지니 아래 단계가 자리를 비켜줘야 합니다. 팔레트 테스트가 잡았습니다.",
-    },
-    Message {
-        from: "you",
-        body: "Show me the surface ramp.",
-    },
-];
+pub fn opening() -> Vec<Message> {
+    vec![
+        Message {
+            from: "you".into(),
+            body: "왜 라이트 테마에서 카드가 안 보였어?".into(),
+        },
+        Message {
+            from: "puck".into(),
+            body: "raised 와 floating 이 둘 다 흰색이었습니다. 밝은 테마는 위로 갈수록 흰색에 \
+                   가까워지니 아래 단계가 자리를 비켜줘야 합니다. 팔레트 테스트가 잡았습니다."
+                .into(),
+        },
+    ]
+}
 
 fn main() -> Result<(), winit::error::EventLoopError> {
     let theme = Theme::dark();
     let mut dark = true;
+    let mut messages = opening();
+    let mut composer = Editor::default();
+    let mut opened = false;
 
     wisp::run(
         WindowOptions {
@@ -52,26 +55,59 @@ fn main() -> Result<(), winit::error::EventLoopError> {
             ..Default::default()
         },
         move |ui: &mut Ui, _frame| {
+            // A chat window that opens with the keyboard somewhere else is a
+            // chat window you have to click before you can use.
+            if !opened {
+                ui.focus("composer");
+                opened = true;
+            }
             if ui.last().clicked("theme") {
                 dark = !dark;
             }
             let theme = if dark { Theme::dark() } else { Theme::light() };
+            // The field is built and the keystrokes are applied in the same
+            // call, so this has to happen before the tree that contains it.
+            let (line, edited) = ui.field(
+                "composer",
+                &mut composer,
+                &theme,
+                Role::Body,
+                "Say something to Puck…",
+                OnEnter::Submit,
+            );
+            let send = edited.submitted || ui.last().clicked("send");
+            if send && !composer.text().trim().is_empty() {
+                let said = composer.take();
+                messages.push(Message {
+                    from: "you".into(),
+                    body: said.clone(),
+                });
+                messages.push(Message {
+                    from: "puck".into(),
+                    body: format!("You said {} characters. I am a mock.", said.chars().count()),
+                });
+            }
 
-            column()
-                .size(Sizing::Fill, Sizing::Fill)
-                .background(theme.base)
-                .child(title_bar(&theme))
-                .child(
-                    row()
-                        .size(Sizing::Fill, Sizing::Hug)
-                        .cross(wisp::Place::Stretch)
-                        .grow(1.0)
-                        .child(sidebar(&theme, ui))
-                        .child(conversation(&theme, ui)),
-                )
-                .child(status_bar(&theme))
+            window(&theme, ui, &messages, line)
         },
     )
+}
+
+/// The whole window, so that a snapshot can build the same one.
+pub fn window(theme: &Theme, ui: &Ui, messages: &[Message], line: Element) -> Element {
+    column()
+        .size(Sizing::Fill, Sizing::Fill)
+        .background(theme.base)
+        .child(title_bar(theme))
+        .child(
+            row()
+                .size(Sizing::Fill, Sizing::Hug)
+                .cross(wisp::Place::Stretch)
+                .grow(1.0)
+                .child(sidebar(theme, ui))
+                .child(conversation(theme, ui, messages, line)),
+        )
+        .child(status_bar(theme))
 }
 
 fn title_bar(theme: &Theme) -> Element {
@@ -146,20 +182,20 @@ fn sidebar(theme: &Theme, ui: &Ui) -> Element {
     )
 }
 
-fn conversation(theme: &Theme, ui: &Ui) -> Element {
+fn conversation(theme: &Theme, ui: &Ui, messages: &[Message], line: Element) -> Element {
     let mut thread = column()
         .size(Sizing::Fixed(READING), Sizing::Hug)
         .gap(18.0)
         .grow(1.0);
 
-    for message in TRANSCRIPT {
+    for message in messages {
         let mine = message.from == "you";
         thread = thread.child(
             column()
                 .size(Sizing::Fill, Sizing::Hug)
                 .gap(6.0)
                 .child(text(
-                    message.from,
+                    message.from.clone(),
                     Role::Label,
                     if mine { theme.accent } else { theme.quiet },
                 ))
@@ -170,7 +206,7 @@ fn conversation(theme: &Theme, ui: &Ui) -> Element {
                         .corners(12.0)
                         .background(if mine { theme.raised } else { theme.base })
                         .border(1.0, theme.border)
-                        .child(text(message.body, Role::Body, theme.ink)),
+                        .child(text(message.body.clone(), Role::Body, theme.ink)),
                 ),
         );
     }
@@ -182,10 +218,10 @@ fn conversation(theme: &Theme, ui: &Ui) -> Element {
         .gap(20.0)
         .cross(wisp::Place::Centre)
         .child(thread)
-        .child(composer(theme, ui))
+        .child(composer(theme, ui, line))
 }
 
-fn composer(theme: &Theme, ui: &Ui) -> Element {
+fn composer(theme: &Theme, ui: &Ui, line: Element) -> Element {
     column()
         .size(Sizing::Fixed(READING), Sizing::Hug)
         .padding(Edges::all(12.0))
@@ -196,12 +232,12 @@ fn composer(theme: &Theme, ui: &Ui) -> Element {
         // to reach for. Two things claiming to be in front is neither of them
         // being in front.
         .surface(theme, Elevation::Floating)
-        .child(text("Say something to Puck…", Role::Body, theme.quiet))
+        .child(line)
         .child(
             row()
                 .size(Sizing::Fill, Sizing::Hug)
                 .gap(8.0)
-                .child(text("claude", Role::Caption, theme.quiet))
+                .child(text("claude · Enter to send", Role::Caption, theme.quiet))
                 .child(spacer())
                 .child(
                     row()

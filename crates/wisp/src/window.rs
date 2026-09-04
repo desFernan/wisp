@@ -7,6 +7,7 @@ use winit::window::{Window, WindowId};
 
 use wisp_core::{Rgba, Scale, Scene};
 use wisp_gpu::Renderer;
+use wisp_ui::input::{Composition, Input, Key, Press};
 use wisp_ui::{Element, Pointer, Ui};
 
 /// What a window is asked for when it is opened.
@@ -72,6 +73,7 @@ where
         scene: Scene::new(),
         ui: Ui::new(),
         pointer: Pointer::default(),
+        modifiers: winit::keyboard::ModifiersState::empty(),
     })
 }
 
@@ -90,6 +92,7 @@ struct App<F> {
     scene: Scene,
     ui: Ui,
     pointer: Pointer,
+    modifiers: winit::keyboard::ModifiersState,
 }
 
 impl<F: FnMut(&mut Ui, &Frame) -> Element> App<F> {
@@ -103,6 +106,11 @@ impl<F: FnMut(&mut Ui, &Frame) -> Element> App<F> {
                 self.options.size.1,
             ));
         let window = Arc::new(event_loop.create_window(attributes).ok()?);
+        // Without this the system's input method never engages, and a Korean
+        // or Japanese keyboard produces nothing at all -- not wrong text, no
+        // text. It is one call and it is the whole of what makes composition
+        // work, because the composing itself is the operating system's job.
+        window.set_ime_allowed(true);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let surface = instance.create_surface(window.clone()).ok()?;
@@ -209,6 +217,33 @@ impl<F: FnMut(&mut Ui, &Frame) -> Element> ApplicationHandler for App<F> {
             WindowEvent::CursorLeft { .. } => {
                 self.pointer.at = (f32::MIN, f32::MIN);
             }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers.state();
+            }
+            // The input method's own events. On a keyboard that composes --
+            // Korean, Japanese, Chinese -- these carry the text and the key
+            // events carry nothing, which is why both paths exist.
+            WindowEvent::Ime(ime) => match ime {
+                winit::event::Ime::Preedit(text, cursor) => {
+                    self.ui
+                        .input(Input::Ime(Composition::Preedit(text, cursor)));
+                }
+                winit::event::Ime::Commit(text) => {
+                    self.ui.input(Input::Ime(Composition::Commit(text)));
+                }
+                winit::event::Ime::Enabled | winit::event::Ime::Disabled => {}
+            },
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic,
+                ..
+            } => {
+                if !is_synthetic && event.state == winit::event::ElementState::Pressed {
+                    if let Some(press) = translate(&event, self.modifiers) {
+                        self.ui.input(Input::Key(press));
+                    }
+                }
+            }
             WindowEvent::Resized(size) => {
                 state.config.width = size.width.max(1);
                 state.config.height = size.height.max(1);
@@ -242,6 +277,20 @@ impl<F: FnMut(&mut Ui, &Frame) -> Element> ApplicationHandler for App<F> {
                     elapsed: self.opened.elapsed().as_secs_f32(),
                 };
                 let root = (self.build)(&mut self.ui, &frame);
+                // Where the candidate list should appear. Left unset, macOS
+                // puts the Hangul candidate window in the corner of the screen
+                // rather than under what is being typed.
+                if let Some(focused) = self.ui.focused()
+                    && let Some(bounds) = self.ui.last().bounds_of(focused)
+                {
+                    state.window.set_ime_cursor_area(
+                        winit::dpi::LogicalPosition::new(bounds.left(), bounds.top()),
+                        winit::dpi::LogicalSize::new(
+                            bounds.size.width.max(1.0),
+                            bounds.size.height.max(1.0),
+                        ),
+                    );
+                }
                 let in_points = (
                     state.config.width as f32 / scale.factor(),
                     state.config.height as f32 / scale.factor(),
@@ -269,4 +318,67 @@ impl<F: FnMut(&mut Ui, &Frame) -> Element> ApplicationHandler for App<F> {
             _ => {}
         }
     }
+}
+
+/// One winit key press, in the toolkit's terms.
+///
+/// `None` for anything that is not an edit: a modifier on its own, a function
+/// key, a shortcut nothing here claims.
+fn translate(
+    event: &winit::event::KeyEvent,
+    modifiers: winit::keyboard::ModifiersState,
+) -> Option<Press> {
+    use winit::keyboard::{Key as WKey, NamedKey};
+
+    let shift = modifiers.shift_key();
+    // Alt on macOS, control elsewhere -- both are "by words" on their own
+    // platform, and deciding here is the point of translating at all.
+    let word = if cfg!(target_os = "macos") {
+        modifiers.alt_key()
+    } else {
+        modifiers.control_key()
+    };
+    let command = if cfg!(target_os = "macos") {
+        modifiers.super_key()
+    } else {
+        modifiers.control_key()
+    };
+
+    let key = match &event.logical_key {
+        WKey::Named(NamedKey::Backspace) => Key::Backspace,
+        WKey::Named(NamedKey::Delete) => Key::Delete,
+        WKey::Named(NamedKey::ArrowLeft) => Key::Left,
+        WKey::Named(NamedKey::ArrowRight) => Key::Right,
+        WKey::Named(NamedKey::Home) => Key::Home,
+        WKey::Named(NamedKey::End) => Key::End,
+        WKey::Named(NamedKey::Enter) => Key::Enter,
+        WKey::Named(NamedKey::Escape) => Key::Escape,
+        WKey::Named(NamedKey::Tab) => Key::Tab,
+        WKey::Character(c) if command => match c.as_str() {
+            "a" => Key::SelectAll,
+            "c" => Key::Copy,
+            "x" => Key::Cut,
+            "v" => Key::Paste,
+            _ => return None,
+        },
+        // Held down with a command key, a letter is a shortcut rather than
+        // something to type.
+        _ if command => return None,
+        _ => {
+            let typed = event.text.as_ref()?;
+            // Control characters arrive here as text -- a return is "\r" -- and
+            // inserting them puts an invisible character in the document.
+            if typed.chars().any(char::is_control) {
+                return None;
+            }
+            Key::Insert(typed.to_string())
+        }
+    };
+
+    Some(Press {
+        key,
+        shift,
+        word,
+        modifier: shift,
+    })
 }

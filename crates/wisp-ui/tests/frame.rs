@@ -309,3 +309,162 @@ fn everything_scales_together_on_a_retina_display() {
         "and the scene is in device pixels"
     );
 }
+
+// --- typing -----------------------------------------------------------------
+
+use wisp_ui::Editor;
+use wisp_ui::input::{Composition, Input, Key, Press};
+use wisp_ui::ui::OnEnter;
+
+/// Builds one frame containing a single field, and returns what it did.
+fn typed(
+    ui: &mut Ui,
+    scene: &mut Scene,
+    editor: &mut Editor,
+    on_enter: OnEnter,
+) -> wisp_ui::ui::Edited {
+    scene.clear();
+    let theme = Theme::dark();
+    let (field, edited) = ui.field("f", editor, &theme, Role::Body, "type here", on_enter);
+    let tree = column().size(Sizing::Fill, Sizing::Fill).child(field);
+    ui.frame(&tree, (400.0, 200.0), Scale::ONE, scene);
+    edited
+}
+
+/// Clicks the field, so that it has the keyboard.
+fn focus_the_field(ui: &mut Ui, scene: &mut Scene, editor: &mut Editor) {
+    ui.point(Pointer {
+        at: (4.0, 4.0),
+        down: true,
+    });
+    typed(ui, scene, editor, OnEnter::Submit);
+    ui.point(Pointer {
+        at: (4.0, 4.0),
+        down: false,
+    });
+    typed(ui, scene, editor, OnEnter::Submit);
+    // The click is read on the frame after it, which is when focus moves.
+    typed(ui, scene, editor, OnEnter::Submit);
+}
+
+#[test]
+fn a_field_only_takes_the_keyboard_once_it_has_been_clicked() {
+    let (mut ui, mut scene) = ui();
+    let mut editor = Editor::default();
+    ui.input(Input::Key(Press::new(Key::Insert("a".into()))));
+    typed(&mut ui, &mut scene, &mut editor, OnEnter::Submit);
+    assert_eq!(editor.text(), "", "an unfocused field is not listening");
+
+    focus_the_field(&mut ui, &mut scene, &mut editor);
+    ui.input(Input::Key(Press::new(Key::Insert("a".into()))));
+    typed(&mut ui, &mut scene, &mut editor, OnEnter::Submit);
+    assert_eq!(editor.text(), "a");
+}
+
+#[test]
+fn clicking_away_puts_the_keyboard_down() {
+    let (mut ui, mut scene) = ui();
+    let mut editor = Editor::default();
+    focus_the_field(&mut ui, &mut scene, &mut editor);
+    assert!(ui.has_focus("f"));
+
+    // A press and a release well away from the field.
+    ui.point(Pointer {
+        at: (300.0, 150.0),
+        down: true,
+    });
+    typed(&mut ui, &mut scene, &mut editor, OnEnter::Submit);
+    ui.point(Pointer {
+        at: (300.0, 150.0),
+        down: false,
+    });
+    typed(&mut ui, &mut scene, &mut editor, OnEnter::Submit);
+    assert!(!ui.has_focus("f"));
+}
+
+#[test]
+fn an_input_method_composes_before_it_commits() {
+    // The whole of how Korean is typed. The system hands over a syllable in
+    // progress, replaces it as more of it is typed, and commits it at the end;
+    // nothing here composes anything itself.
+    let (mut ui, mut scene) = ui();
+    let mut editor = Editor::default();
+    focus_the_field(&mut ui, &mut scene, &mut editor);
+
+    for stage in ["ㅎ", "하", "한"] {
+        ui.input(Input::Ime(Composition::Preedit(stage.into(), None)));
+        typed(&mut ui, &mut scene, &mut editor, OnEnter::Submit);
+        assert_eq!(editor.text(), "", "composing text is not in the document");
+        assert_eq!(editor.preedit().text, stage);
+    }
+
+    ui.input(Input::Ime(Composition::Commit("한".into())));
+    typed(&mut ui, &mut scene, &mut editor, OnEnter::Submit);
+    assert_eq!(editor.text(), "한");
+    assert_eq!(editor.preedit().text, "");
+}
+
+#[test]
+fn return_submits_and_the_modifier_makes_a_line() {
+    let (mut ui, mut scene) = ui();
+    let mut editor = Editor::new("hello");
+    focus_the_field(&mut ui, &mut scene, &mut editor);
+
+    ui.input(Input::Key(Press::new(Key::Enter)));
+    let edited = typed(&mut ui, &mut scene, &mut editor, OnEnter::Submit);
+    assert!(edited.submitted);
+    assert_eq!(
+        editor.text(),
+        "hello",
+        "submitting does not change the text"
+    );
+
+    ui.input(Input::Key(Press {
+        modifier: true,
+        ..Press::new(Key::Enter)
+    }));
+    let edited = typed(&mut ui, &mut scene, &mut editor, OnEnter::Submit);
+    assert!(!edited.submitted);
+    assert_eq!(editor.text(), "hello\n");
+}
+
+#[test]
+fn a_field_set_to_newline_never_submits() {
+    let (mut ui, mut scene) = ui();
+    let mut editor = Editor::new("x");
+    focus_the_field(&mut ui, &mut scene, &mut editor);
+    ui.input(Input::Key(Press::new(Key::Enter)));
+    let edited = typed(&mut ui, &mut scene, &mut editor, OnEnter::Newline);
+    assert!(!edited.submitted);
+    assert_eq!(editor.text(), "x\n");
+}
+
+#[test]
+fn a_focused_field_draws_a_caret_and_an_empty_one_draws_its_placeholder() {
+    let (mut ui, mut scene) = ui();
+    let mut editor = Editor::default();
+    // Unfocused: the placeholder and nothing else.
+    typed(&mut ui, &mut scene, &mut editor, OnEnter::Submit);
+    let before = scene.quads().len();
+
+    focus_the_field(&mut ui, &mut scene, &mut editor);
+    typed(&mut ui, &mut scene, &mut editor, OnEnter::Submit);
+    assert!(
+        scene.quads().len() > before,
+        "a focused field should have drawn a caret"
+    );
+}
+
+#[test]
+fn keystrokes_nobody_was_listening_for_are_dropped() {
+    // Kept, they would arrive in whatever is focused next -- half a sentence
+    // appearing in the field somebody has just clicked into.
+    let (mut ui, mut scene) = ui();
+    let mut editor = Editor::default();
+    ui.input(Input::Key(Press::new(Key::Insert("stray".into()))));
+    typed(&mut ui, &mut scene, &mut editor, OnEnter::Submit);
+
+    focus_the_field(&mut ui, &mut scene, &mut editor);
+    typed(&mut ui, &mut scene, &mut editor, OnEnter::Submit);
+    assert_eq!(editor.text(), "");
+}

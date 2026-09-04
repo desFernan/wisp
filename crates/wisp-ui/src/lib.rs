@@ -5,10 +5,14 @@
 //! the type scale and the surface ramp that most toolkits leave to the
 //! application and most applications never get round to.
 
+pub mod editor;
 pub mod element;
+pub mod input;
 pub mod theme;
 pub mod ui;
 
+pub use editor::{Editor, Preedit};
 pub use element::{Axis, Edges, Element, Id, Place, Sizing, column, div, row, spacer, text};
+pub use input::{Composition, Input, Key, Press};
 pub use theme::{Elevation, Role, Theme};
 pub use ui::{Interactions, Pointer, Ui};

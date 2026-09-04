@@ -5,7 +5,7 @@
 //! set of answers. Nothing is retained between frames except the pointer's
 //! state, which belongs to the mouse rather than to the interface.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use taffy::prelude::*;
 use wisp_core::geometry::{Point, Rect};
@@ -13,7 +13,10 @@ use wisp_core::scene::{Background, Border, Corners, Quad};
 use wisp_core::{DevicePixels, Scale, Scene};
 use wisp_text::TextSystem;
 
-use crate::element::{Axis, Element, Id, Label, Place, Sizing};
+use crate::editor::Editor;
+use crate::element::{Axis, Edges, Element, Id, Label, Place, Sizing, div, row, text};
+use crate::input::{Composition, Input, Key};
+use crate::theme::{Role, Theme};
 
 /// What the pointer is doing, in points.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -49,9 +52,19 @@ impl Interactions {
         self.clicked == Some(Id(id))
     }
 
+    /// What was clicked, whatever it was called.
+    pub fn clicked_id(&self) -> Option<Id> {
+        self.clicked
+    }
+
     /// Where a named box ended up, in points.
     pub fn bounds(&self, id: &'static str) -> Option<Rect<f32>> {
         self.boxes.get(&Id(id)).copied()
+    }
+
+    /// The same, for an [`Id`] that is already in hand.
+    pub fn bounds_of(&self, id: Id) -> Option<Rect<f32>> {
+        self.boxes.get(&id).copied()
     }
 }
 
@@ -63,6 +76,21 @@ pub struct Ui {
     was_down: bool,
     pressed_on: Option<Id>,
     last: Interactions,
+    /// Which field the keyboard is talking to, if any.
+    focused: Option<Id>,
+    /// Everything that arrived since the last frame, waiting for the field it
+    /// belongs to to be built.
+    pending: Vec<Input>,
+    /// The fields that existed in the frame just gone. Clicking anything that
+    /// is not one of these puts the keyboard down.
+    fields: HashSet<Id>,
+    seen: HashSet<Id>,
+    /// Whether a click finished this frame, wherever it landed.
+    ///
+    /// Not the same question as which box was clicked: most of a window is
+    /// unnamed, and clicking the empty part of it should still put the
+    /// keyboard down.
+    released: bool,
 }
 
 impl Default for Ui {
@@ -79,6 +107,11 @@ impl Ui {
             was_down: false,
             pressed_on: None,
             last: Interactions::default(),
+            focused: None,
+            pending: Vec::new(),
+            fields: HashSet::new(),
+            seen: HashSet::new(),
+            released: false,
         }
     }
 
@@ -100,6 +133,37 @@ impl Ui {
     /// Where the pointer is and whether its button is down, in points.
     pub fn point(&mut self, pointer: Pointer) {
         self.pointer = pointer;
+    }
+
+    /// Something the keyboard or the input method did.
+    ///
+    /// Queued rather than applied: which field it belongs to is not known
+    /// until that field is built, and the frame that builds it has not run
+    /// yet.
+    pub fn input(&mut self, input: Input) {
+        self.pending.push(input);
+    }
+
+    /// Which field the keyboard is talking to.
+    pub fn focused(&self) -> Option<Id> {
+        self.focused
+    }
+
+    pub fn focus(&mut self, id: &'static str) {
+        self.focused = Some(Id(id));
+    }
+
+    pub fn blur(&mut self) {
+        self.focused = None;
+        // Anything half composed goes with the focus. Leaving it queued means
+        // it lands in whatever is focused next, which is somebody else's
+        // half-typed syllable appearing in their password field.
+        self.pending.retain(|input| !matches!(input, Input::Ime(_)));
+    }
+
+    /// Whether this field has the keyboard.
+    pub fn has_focus(&self, id: &'static str) -> bool {
+        self.focused == Some(Id(id))
     }
 
     /// Lays out `root` to fill `size` points, paints it into `scene`, and
@@ -188,6 +252,23 @@ impl Ui {
         let mut painted = Vec::new();
         self.paint(&tree, node, root, (0.0, 0.0), scale, scene, &mut painted);
         self.last = self.resolve(painted);
+
+        // Clicking anything that is not a field puts the keyboard down. The
+        // set is this frame's fields, and the click is this frame's click, so
+        // a click *on* a field never blurs it -- the field picks the same click
+        // up next frame and takes the keyboard.
+        self.fields = std::mem::take(&mut self.seen);
+        let onto_a_field = self
+            .last
+            .clicked
+            .is_some_and(|id| self.fields.contains(&id));
+        if self.released && !onto_a_field {
+            self.blur();
+        }
+        // Keystrokes nobody was listening for. Kept, they would arrive in
+        // whatever is focused next, which is somebody's half-typed sentence
+        // appearing in the field they just clicked into.
+        self.pending.clear();
         Interactions {
             hovered: self.last.hovered,
             pressed: self.last.pressed,
@@ -312,6 +393,7 @@ impl Ui {
         } else {
             None
         };
+        self.released = came_up;
         if came_up {
             self.pressed_on = None;
         }
@@ -427,4 +509,178 @@ fn to_taffy(element: &Element, parent: Axis) -> taffy::Style {
         flex_shrink: shrink,
         ..Default::default()
     }
+}
+
+/// How a field answers the return key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnEnter {
+    /// Return submits, and the modifier makes a new line. What a composer in a
+    /// chat window wants.
+    Submit,
+    /// Return always makes a new line. What an editor wants.
+    Newline,
+}
+
+/// What a field did with the input it was handed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Edited {
+    /// The text changed.
+    pub changed: bool,
+    /// Return was pressed and the field is set to submit on it.
+    pub submitted: bool,
+    /// Escape was pressed.
+    pub cancelled: bool,
+}
+
+impl Ui {
+    /// An editable line, and the keyboard input that belongs to it.
+    ///
+    /// The element is built and the pending input is applied in the same call,
+    /// because they are the same question: this is the field that has the
+    /// keyboard, so this is the field the keystrokes were for.
+    pub fn field(
+        &mut self,
+        id: &'static str,
+        editor: &mut Editor,
+        theme: &Theme,
+        role: Role,
+        placeholder: &str,
+        on_enter: OnEnter,
+    ) -> (Element, Edited) {
+        let name = Id(id);
+        self.seen.insert(name);
+        // Clicking a field takes the keyboard. The click is from the frame
+        // before, which is the frame the user was looking at when they aimed.
+        if self.last.clicked(id) {
+            self.focused = Some(name);
+        }
+
+        let mut edited = Edited::default();
+        if self.focused == Some(name) {
+            for input in std::mem::take(&mut self.pending) {
+                edited = self.apply(editor, input, on_enter, edited);
+            }
+        }
+
+        let focused = self.focused == Some(name);
+        let quiet = theme.quiet;
+        let mut line = row().gap(0.0).id(id).cross(Place::Centre);
+
+        if editor.text().is_empty() && editor.preedit().text.is_empty() {
+            line = line.child(text(placeholder, role, quiet));
+            if focused {
+                line = line.child(caret(theme, role));
+            }
+            return (line, edited);
+        }
+
+        let content = editor.text().to_string();
+        match editor.selection() {
+            Some((from, to)) if focused => {
+                line = line
+                    .child(text(content[..from].to_string(), role, theme.ink))
+                    .child(
+                        row()
+                            // A selection is a run of text with something
+                            // behind it, not a rectangle drawn over the top:
+                            // over the top would need the glyphs redrawn to
+                            // stay legible.
+                            .background(theme.accent.with_alpha(0.30))
+                            .corners(3.0)
+                            .child(text(content[from..to].to_string(), role, theme.ink)),
+                    )
+                    .child(text(content[to..].to_string(), role, theme.ink));
+            }
+            _ => {
+                let at = editor.caret();
+                line = line.child(text(content[..at].to_string(), role, theme.ink));
+                if focused && !editor.preedit().text.is_empty() {
+                    line = line.child(composing(&editor.preedit().text, theme, role));
+                } else if focused {
+                    line = line.child(caret(theme, role));
+                }
+                line = line.child(text(content[at..].to_string(), role, theme.ink));
+            }
+        }
+        (line, edited)
+    }
+
+    fn apply(
+        &mut self,
+        editor: &mut Editor,
+        input: Input,
+        on_enter: OnEnter,
+        mut edited: Edited,
+    ) -> Edited {
+        match input {
+            Input::Ime(Composition::Preedit(text, cursor)) => {
+                editor.compose(text, cursor);
+                edited.changed = true;
+            }
+            Input::Ime(Composition::Commit(text)) => {
+                editor.insert(&text);
+                edited.changed = true;
+            }
+            Input::Key(press) => match press.key {
+                Key::Insert(text) => {
+                    editor.insert(&text);
+                    edited.changed = true;
+                }
+                Key::Backspace => {
+                    editor.backspace();
+                    edited.changed = true;
+                }
+                Key::Delete => {
+                    editor.delete();
+                    edited.changed = true;
+                }
+                Key::Left if press.word => editor.move_word_left(press.shift),
+                Key::Right if press.word => editor.move_word_right(press.shift),
+                Key::Left => editor.move_left(press.shift),
+                Key::Right => editor.move_right(press.shift),
+                Key::Home => editor.move_home(press.shift),
+                Key::End => editor.move_end(press.shift),
+                Key::SelectAll => editor.select_all(),
+                Key::Escape => edited.cancelled = true,
+                Key::Enter => match (on_enter, press.modifier) {
+                    (OnEnter::Submit, false) => edited.submitted = true,
+                    _ => {
+                        editor.insert("\n");
+                        edited.changed = true;
+                    }
+                },
+                // Nothing yet: the clipboard is the platform's, and reaching
+                // for it from here would put a platform in this crate.
+                Key::Copy | Key::Cut | Key::Paste | Key::Tab => {}
+            },
+        }
+        edited
+    }
+}
+
+/// The blinking bar. Not blinking yet -- a caret that blinks needs a clock,
+/// and a clock in a frame is a redraw every half second whether or not
+/// anything changed.
+fn caret(theme: &Theme, role: Role) -> Element {
+    div()
+        .size(
+            Sizing::Fixed(1.5),
+            Sizing::Fixed(role.size() * role.leading()),
+        )
+        .background(theme.accent)
+}
+
+/// Text an input method is still composing: tinted and underlined, which is
+/// what every platform draws and therefore what everyone already reads as
+/// "this is not typed yet".
+fn composing(what: &str, theme: &Theme, role: Role) -> Element {
+    row()
+        .padding(Edges {
+            top: 0.0,
+            right: 0.0,
+            bottom: 1.0,
+            left: 0.0,
+        })
+        .border(0.0, theme.accent)
+        .child(text(what.to_string(), role, theme.accent))
 }

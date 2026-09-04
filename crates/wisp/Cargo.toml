@@ -15,7 +15,15 @@ wisp-ui.workspace = true
 wgpu = "30"
 winit = "0.30"
 pollster = "0.4"
+anyhow = "1"
 raw-window-handle = "0.6"
+png = { version = "0.17", optional = true }
+
+[features]
+default = ["snapshot"]
+# Rendering a frame to a file with no window. Small, and the only honest way
+# to check what a toolkit draws.
+snapshot = ["dep:png"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
