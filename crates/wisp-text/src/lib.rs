@@ -16,4 +16,4 @@ mod atlas;
 mod layout;
 
 pub use atlas::{Atlas, AtlasSlot};
-pub use layout::{Font, TextSystem, Weight};
+pub use layout::{Align, Font, TextSystem, Weight};

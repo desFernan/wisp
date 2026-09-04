@@ -243,10 +243,11 @@ impl Ui {
                     _ => None,
                 });
                 let font = label.role.font(scale);
-                let (w, h) = text.measure(
+                let (w, h) = text.measure_aligned(
                     &label.text,
                     &font,
                     wrap.map(|w| DevicePixels(w * scale.factor())),
+                    label.align,
                 );
                 taffy::tree::LayoutOutput::from_outer_size(taffy::Size {
                     width: known.width.unwrap_or(w.get() / scale.factor()),
@@ -401,7 +402,7 @@ impl Ui {
 
         if let Some(label) = element.label.as_ref() {
             let font = label.role.font(scale);
-            self.text.draw_clipped(
+            self.text.draw_all(
                 scene,
                 &label.text,
                 &font,
@@ -418,6 +419,7 @@ impl Ui {
                 Some(DevicePixels((bounds.size.width + 0.5) * scale.factor())),
                 label.colour,
                 device_clip,
+                label.align,
             );
         }
 

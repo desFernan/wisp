@@ -129,6 +129,8 @@ pub struct Label {
     pub text: String,
     pub role: Role,
     pub colour: Rgba,
+    /// Where the line sits in the width it was given.
+    pub align: wisp_text::Align,
 }
 
 /// One box.
@@ -172,6 +174,7 @@ pub fn text(content: impl Into<String>, role: Role, colour: Rgba) -> Element {
         text: content.into(),
         role,
         colour,
+        align: wisp_text::Align::Start,
     });
     element
 }
@@ -291,6 +294,18 @@ impl Element {
     pub fn scroll(mut self, id: &'static str) -> Self {
         self.style.scroll = true;
         self.id = Some(Id(id));
+        self
+    }
+
+    /// Where this text sits in the width it was given.
+    ///
+    /// Only meaningful on text, and only visible when the box is wider than
+    /// the line -- which for a paragraph in a column it always is, since a
+    /// paragraph takes the column's width.
+    pub fn align(mut self, align: wisp_text::Align) -> Self {
+        if let Some(label) = self.label.as_mut() {
+            label.align = align;
+        }
         self
     }
 

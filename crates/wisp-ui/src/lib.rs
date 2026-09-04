@@ -16,3 +16,4 @@ pub use element::{Axis, Edges, Element, Id, Place, Sizing, column, div, row, spa
 pub use input::{Composition, Input, Key, Press};
 pub use theme::{Elevation, Role, Theme};
 pub use ui::{Interactions, Pointer, Ui};
+pub use wisp_text::Align;

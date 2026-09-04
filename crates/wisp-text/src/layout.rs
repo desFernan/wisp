@@ -7,6 +7,28 @@ use wisp_core::{DevicePixels, Rgba, Scene};
 
 use crate::atlas::{Atlas, AtlasSlot};
 
+/// Where a line sits in the space it was given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Align {
+    #[default]
+    Start,
+    Centre,
+    End,
+}
+
+impl Align {
+    fn to_cosmic(self) -> Option<cosmic_text::Align> {
+        match self {
+            // `None` rather than `Left`: left is not the start of every
+            // script, and asking for it explicitly would put Arabic and Hebrew
+            // on the wrong side of their own column.
+            Self::Start => None,
+            Self::Centre => Some(cosmic_text::Align::Center),
+            Self::End => Some(cosmic_text::Align::End),
+        }
+    }
+}
+
 /// How heavy a face to ask for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Weight {
@@ -121,14 +143,27 @@ impl TextSystem {
         font: &Font,
         wrap: Option<DevicePixels>,
     ) -> (DevicePixels, DevicePixels) {
+        self.measure_aligned(text, font, wrap, Align::Start)
+    }
+
+    /// As [`Self::measure`], for text that is not set from the start.
+    pub fn measure_aligned(
+        &mut self,
+        text: &str,
+        font: &Font,
+        wrap: Option<DevicePixels>,
+        align: Align,
+    ) -> (DevicePixels, DevicePixels) {
         let mut nowhere = Scene::new();
-        self.draw(
+        self.draw_all(
             &mut nowhere,
             text,
             font,
             Point::new(DevicePixels::ZERO, DevicePixels::ZERO),
             wrap,
             Rgba::TRANSPARENT,
+            None,
+            align,
         )
     }
 
@@ -145,7 +180,7 @@ impl TextSystem {
         wrap: Option<DevicePixels>,
         colour: Rgba,
     ) -> (DevicePixels, DevicePixels) {
-        self.draw_clipped(scene, text, font, at, wrap, colour, None)
+        self.draw_all(scene, text, font, at, wrap, colour, None, Align::Start)
     }
 
     /// As [`Self::draw`], with nothing outside `clip` drawn.
@@ -160,6 +195,22 @@ impl TextSystem {
         colour: Rgba,
         clip: Option<wisp_core::geometry::Rect<DevicePixels>>,
     ) -> (DevicePixels, DevicePixels) {
+        self.draw_all(scene, text, font, at, wrap, colour, clip, Align::Start)
+    }
+
+    /// The one that does the work.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_all(
+        &mut self,
+        scene: &mut Scene,
+        text: &str,
+        font: &Font,
+        at: Point<DevicePixels>,
+        wrap: Option<DevicePixels>,
+        colour: Rgba,
+        clip: Option<wisp_core::geometry::Rect<DevicePixels>>,
+        align: Align,
+    ) -> (DevicePixels, DevicePixels) {
         let metrics = Metrics::new(font.size.get(), font.line_height.get());
         let mut buffer = Buffer::new(&mut self.fonts, metrics);
         buffer.set_size(wrap.map(|w| w.get()), None);
@@ -171,7 +222,7 @@ impl TextSystem {
         // Advanced, not basic: basic shaping is a per-character lookup, which
         // is wrong for anything with ligatures or marks and silently wrong for
         // scripts that reorder.
-        buffer.set_text(text, &attrs, Shaping::Advanced, None);
+        buffer.set_text(text, &attrs, Shaping::Advanced, align.to_cosmic());
         buffer.shape_until_scroll(&mut self.fonts, false);
 
         let mut used = (DevicePixels::ZERO, DevicePixels::ZERO);
