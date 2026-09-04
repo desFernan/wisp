@@ -21,6 +21,20 @@ pub struct WindowOptions {
     pub clear: Rgba,
     pub transparent: bool,
     pub decorated: bool,
+    /// A window that sits over everything and lets clicks through wherever
+    /// nothing was drawn.
+    ///
+    /// Turning this on makes the window borderless, transparent, always on
+    /// top, and shadowless, and asks the scene on every frame whether there is
+    /// anything under the pointer. macOS only so far.
+    pub overlay: bool,
+    /// Check the overlay against the window server after a few frames, report,
+    /// and quit.
+    ///
+    /// Has to run inside the application: the call that answers "which window
+    /// would a click here hit" returns nothing useful from a plain
+    /// command-line process.
+    pub selftest: bool,
 }
 
 impl Default for WindowOptions {
@@ -31,6 +45,8 @@ impl Default for WindowOptions {
             clear: Rgba::TRANSPARENT,
             transparent: true,
             decorated: true,
+            overlay: false,
+            selftest: false,
         }
     }
 }
@@ -74,6 +90,9 @@ where
         ui: Ui::new(),
         pointer: Pointer::default(),
         modifiers: winit::keyboard::ModifiersState::empty(),
+        drawn: 0,
+        #[cfg(target_os = "macos")]
+        checker: crate::selftest::Checker::default(),
     })
 }
 
@@ -82,6 +101,8 @@ struct State {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     renderer: Renderer,
+    #[cfg(target_os = "macos")]
+    overlay: Option<wisp_overlay::Overlay>,
 }
 
 struct App<F> {
@@ -93,14 +114,25 @@ struct App<F> {
     ui: Ui,
     pointer: Pointer,
     modifiers: winit::keyboard::ModifiersState,
+    /// Frames drawn, so that a selftest starts on a frame that has actually
+    /// been presented rather than on the first one, which has not.
+    drawn: u32,
+    #[cfg(target_os = "macos")]
+    checker: crate::selftest::Checker,
 }
 
 impl<F: FnMut(&mut Ui, &Frame) -> Element> App<F> {
     fn open(&mut self, event_loop: &ActiveEventLoop) -> Option<State> {
+        let overlay = self.options.overlay;
         let attributes = Window::default_attributes()
             .with_title(self.options.title.clone())
-            .with_transparent(self.options.transparent)
-            .with_decorations(self.options.decorated)
+            .with_transparent(self.options.transparent || overlay)
+            .with_decorations(self.options.decorated && !overlay)
+            .with_window_level(if overlay {
+                winit::window::WindowLevel::AlwaysOnTop
+            } else {
+                winit::window::WindowLevel::Normal
+            })
             .with_inner_size(winit::dpi::LogicalSize::new(
                 self.options.size.0,
                 self.options.size.1,
@@ -152,11 +184,31 @@ impl<F: FnMut(&mut Ui, &Frame) -> Element> App<F> {
         surface.configure(&device, &config);
 
         crate::diagnostics::announce_window_id(&window);
+
+        #[cfg(target_os = "macos")]
+        let overlay = self
+            .options
+            .overlay
+            .then(|| wisp_overlay::Overlay::adopt(&*window));
+        #[cfg(target_os = "macos")]
+        let overlay = overlay.flatten();
+        #[cfg(target_os = "macos")]
+        if let Some(overlay) = overlay.as_ref() {
+            // Asked for after the window exists rather than at creation: a
+            // borderless window made with a title bar keeps its resize border
+            // and its shadow, and a shadow around a transparent window is a
+            // grey rectangle floating over the desktop with nothing in it.
+            overlay.make_bare();
+            overlay.keep_on_top();
+        }
+
         Some(State {
             window,
             surface,
             config,
             renderer: Renderer::new(device, queue, format),
+            #[cfg(target_os = "macos")]
+            overlay,
         })
     }
 }
@@ -310,6 +362,27 @@ impl<F: FnMut(&mut Ui, &Frame) -> Element> ApplicationHandler for App<F> {
                     state.config.height as f32 / scale.factor(),
                 );
                 self.ui.frame(&root, in_points, scale, &mut self.scene);
+                // Whether the pointer is over anything this frame drew. Asked
+                // of the window server rather than taken from the last mouse
+                // event: while the window is letting clicks through it stops
+                // receiving them, so the last event's position is wherever the
+                // pointer was when it stopped listening.
+                #[cfg(target_os = "macos")]
+                if let Some(overlay) = state.overlay.as_mut()
+                    && let (Some(cursor), Some(frame)) = (overlay.cursor(), overlay.frame())
+                {
+                    let local = wisp_core::geometry::Point::new(
+                        wisp_core::DevicePixels(
+                            (cursor.0.get() - frame.left().get()) * scale.factor(),
+                        ),
+                        wisp_core::DevicePixels(
+                            (cursor.1.get() - frame.top().get()) * scale.factor(),
+                        ),
+                    );
+                    let solid = self.scene.covers(local, wisp_overlay::SOLID);
+                    overlay.set_click_through(!solid);
+                }
+
                 // Any glyph the frame asked for has been rasterised by now,
                 // so this is where the atlas and the GPU agree again. Only
                 // what changed is sent.
@@ -328,6 +401,20 @@ impl<F: FnMut(&mut Ui, &Frame) -> Element> ApplicationHandler for App<F> {
                 // Presented before the next frame is asked for, so that the
                 // request lands after the surface has had this one.
                 state.renderer.queue().present(surface_texture);
+                self.drawn += 1;
+
+                #[cfg(target_os = "macos")]
+                if self.options.selftest && self.drawn > 8 {
+                    let done = state.overlay.as_ref().and_then(|overlay| {
+                        self.checker.step(overlay, &self.scene, in_points, scale)
+                    });
+                    if let Some(passed) = done {
+                        if !passed {
+                            eprintln!("wisp: the overlay selftest failed");
+                        }
+                        event_loop.exit();
+                    }
+                }
             }
             _ => {}
         }

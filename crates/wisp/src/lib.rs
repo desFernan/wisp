@@ -5,6 +5,8 @@
 //! platform.
 
 mod diagnostics;
+#[cfg(target_os = "macos")]
+mod selftest;
 #[cfg(feature = "snapshot")]
 pub mod snapshot;
 mod window;

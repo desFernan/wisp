@@ -1,0 +1,27 @@
+[package]
+name = "wisp-overlay"
+description = "Transparent, always-on-top, click-through windows for wisp."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+wisp-core.workspace = true
+raw-window-handle = "0.6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-core-graphics = "0.3"
+objc2-core-foundation = "0.3"
+objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+objc2-app-kit = { version = "0.3", features = [
+    "NSWindow",
+    "NSView",
+    "NSScreen",
+    "NSResponder",
+    "NSEvent",
+    "NSApplication",
+    "NSGraphics",
+] }

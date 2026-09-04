@@ -8,15 +8,19 @@ with that content**, and is paced by the display rather than by a timer.
 The core underneath it is general purpose. The overlay case is what it is
 for.
 
-> **Status: early.** You can build a real window with it — layout, text,
-> typing in any language, scrolling, pointer input and a design system all work
-> and are tested. What is missing is the thing it is named for: the overlay.
-> See [Where this is](#where-this-is).
+> **Status: early, and it does the thing it is named for.** Layout, text,
+> typing in any language, scrolling, pointer input, a design system, and
+> transparent always-on-top windows that let clicks through wherever nothing is
+> drawn. See [Where this is](#where-this-is) for what is not here.
 
 ```sh
 cargo run --example chat -p wisp      # a chat window, built out of the toolkit
 cargo run --example gallery -p wisp   # the type scale and the surface ramp
+cargo run --example overlay -p wisp   # a card over your desktop that clicks fall through
 ```
+
+`cargo run --example overlay -- --selftest` asks the window server whether the
+overlay behaves, and quits.
 
 62 tests.
 
@@ -58,7 +62,7 @@ each of these bugs first:
 | pointer input | **done** — hover, press and click, hit-tested against the frame that was drawn. A click is a press and a release on the same box, so sliding off one and letting go cancels |
 | text entry, focus, IME | **done** — a grapheme-aware editor, click to focus, and composition through the system's input method, so Korean, Japanese and Chinese all work without this library composing anything itself |
 | scrolling | **done** — a box that keeps its size, cuts what reaches past it, and takes the wheel from whichever scrolling box the pointer is over |
-| the overlay itself: click-through, hit masks, following its content | not started, and it is the whole point — everything above is the floor it needs |
+| the overlay: transparent, always on top, click-through per pixel | **done** on macOS — `wisp-overlay`, with a selftest that asks the window server rather than reading back its own flags |
 
 The milestone that decides whether any of this worked is porting a real desktop
 pet onto it. Until then the honest description is "a renderer with a window
@@ -71,7 +75,8 @@ around it".
 | `wisp-core` | geometry, colour, the display list | nothing |
 | `wisp-gpu` | the wgpu renderer | `wisp-core`, `wgpu` |
 | `wisp-text` | shaping, rasterising, the glyph atlas | `wisp-core`, `cosmic-text` |
-| `wisp-ui` | layout, pointer input, the design system | `wisp-core`, `wisp-text`, `taffy` |
+| `wisp-ui` | layout, input, editing, the design system | `wisp-core`, `wisp-text`, `taffy` |
+| `wisp-overlay` | transparent, always-on-top, click-through windows | `wisp-core`, AppKit |
 | `wisp` | the window, and the umbrella re-export | all of them |
 
 `wisp-core` has no GPU and no platform in it, which is why nearly every test

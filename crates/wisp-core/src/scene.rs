@@ -7,7 +7,7 @@
 //! radius larger than the box is handled -- be tested without a device.
 
 use crate::colour::Rgba;
-use crate::geometry::Rect;
+use crate::geometry::{Point, Rect};
 use crate::units::DevicePixels;
 
 /// A corner radius per corner.
@@ -268,6 +268,42 @@ pub struct Masked {
     pub colour: Rgba,
 }
 
+/// Whether a point falls in the part of a corner that has been rounded away.
+fn outside_corner(quad: &Quad, point: Point<DevicePixels>) -> bool {
+    let corners = quad.corners.fitted_to(quad.bounds);
+    let bounds = quad.bounds;
+    // Which corner this point is nearest, and the radius belonging to it.
+    let left = point.x.get() < bounds.centre().x.get();
+    let top = point.y.get() < bounds.centre().y.get();
+    let radius = match (left, top) {
+        (true, true) => corners.top_left,
+        (false, true) => corners.top_right,
+        (false, false) => corners.bottom_right,
+        (true, false) => corners.bottom_left,
+    }
+    .get();
+    if radius <= 0.0 {
+        return false;
+    }
+    // The centre of that corner's arc.
+    let cx = if left {
+        bounds.left().get() + radius
+    } else {
+        bounds.right().get() - radius
+    };
+    let cy = if top {
+        bounds.top().get() + radius
+    } else {
+        bounds.bottom().get() - radius
+    };
+    let (dx, dy) = (point.x.get() - cx, point.y.get() - cy);
+    // Only the quarter beyond the arc's centre is cut away; everything nearer
+    // the middle of the box is inside whatever the radius is.
+    let beyond_x = if left { dx < 0.0 } else { dx > 0.0 };
+    let beyond_y = if top { dy < 0.0 } else { dy > 0.0 };
+    beyond_x && beyond_y && (dx * dx + dy * dy) > radius * radius
+}
+
 /// One frame's worth of drawing, back to front.
 ///
 /// Two lists rather than one, because they are two draw calls: everything with
@@ -328,6 +364,45 @@ impl Scene {
     pub fn clear(&mut self) {
         self.quads.clear();
         self.masked.clear();
+    }
+
+    /// Whether anything solid was drawn at this point.
+    ///
+    /// The question a click-through window has to answer on every frame: the
+    /// pointer is here, is there any of me under it? A window over somebody's
+    /// desktop that answers yes everywhere is a sheet of glass they cannot
+    /// click through, and one that answers no everywhere cannot be clicked at
+    /// all.
+    ///
+    /// Corners count. A rounded card's corner is outside the card, and a
+    /// window that claimed it would have an invisible square hit area around
+    /// every rounded thing on it.
+    ///
+    /// Shadows do not: they are a soft edge that is mostly transparent, and
+    /// catching clicks in one means catching them a long way from anything you
+    /// can see.
+    pub fn covers(&self, point: Point<DevicePixels>, threshold: f32) -> bool {
+        let solid = |colour: &Rgba| colour.a > threshold;
+        let quad_covers = |quad: &Quad| {
+            if quad.clip.is_some_and(|clip| !clip.contains(point)) {
+                return false;
+            }
+            if !quad.bounds.contains(point) {
+                return false;
+            }
+            let filled = match &quad.background {
+                Background::Solid(colour) => solid(colour),
+                Background::LinearGradient { stops, .. } => stops.iter().any(|(_, c)| solid(c)),
+            };
+            let bordered = quad.border.is_some_and(|b| solid(&b.colour));
+            (filled || bordered) && !outside_corner(quad, point)
+        };
+        self.quads.iter().any(quad_covers)
+            || self.masked.iter().any(|masked| {
+                solid(&masked.colour)
+                    && masked.bounds.contains(point)
+                    && !masked.clip.is_some_and(|clip| !clip.contains(point))
+            })
     }
 
     /// Everything this scene will put pixels on, or `None` for an empty one.
@@ -505,5 +580,110 @@ mod tests {
         scene.push(Quad::new(second, solid()));
         assert_eq!(scene.quads()[0].bounds, first);
         assert_eq!(scene.quads()[1].bounds, second);
+    }
+}
+
+#[cfg(test)]
+mod covering {
+    use super::*;
+    use crate::geometry::Point;
+
+    fn px(v: f32) -> DevicePixels {
+        DevicePixels(v)
+    }
+
+    fn at(x: f32, y: f32) -> Point<DevicePixels> {
+        Point::new(px(x), px(y))
+    }
+
+    fn card() -> Quad {
+        Quad::new(
+            Rect::from_edges(px(0.0), px(0.0), px(100.0), px(100.0)),
+            Background::Solid(Rgba::hex(0xffffff)),
+        )
+    }
+
+    #[test]
+    fn a_solid_box_covers_what_is_inside_it_and_nothing_else() {
+        let mut scene = Scene::new();
+        scene.push(card());
+        assert!(scene.covers(at(50.0, 50.0), 0.1));
+        assert!(!scene.covers(at(150.0, 50.0), 0.1));
+    }
+
+    #[test]
+    fn a_rounded_corner_is_not_covered() {
+        // Otherwise every rounded thing in an overlay has an invisible square
+        // of hit area around it.
+        let mut scene = Scene::new();
+        scene.push(card().with_corners(Corners::all(px(30.0))));
+        assert!(scene.covers(at(50.0, 50.0), 0.1), "the middle is covered");
+        assert!(!scene.covers(at(2.0, 2.0), 0.1), "the corner is not");
+        assert!(scene.covers(at(50.0, 2.0), 0.1), "the middle of an edge is");
+    }
+
+    #[test]
+    fn a_transparent_box_covers_nothing() {
+        let mut scene = Scene::new();
+        scene.push(Quad::new(
+            card().bounds,
+            Background::Solid(Rgba::hex(0xffffff).with_alpha(0.02)),
+        ));
+        assert!(!scene.covers(at(50.0, 50.0), 0.1));
+    }
+
+    #[test]
+    fn a_shadow_does_not_catch_clicks() {
+        // It is a soft edge that is mostly transparent, and catching a click
+        // in one means catching it a long way from anything you can see.
+        let mut scene = Scene::new();
+        scene.push(card().with_shadow(Shadow {
+            offset: (px(0.0), px(0.0)),
+            blur: px(40.0),
+            spread: px(0.0),
+            colour: Rgba::hex(0x000000),
+        }));
+        assert!(
+            !scene.covers(at(-20.0, 50.0), 0.1),
+            "in the shadow, outside the card"
+        );
+    }
+
+    #[test]
+    fn a_clipped_box_does_not_cover_what_was_cut_away() {
+        let mut scene = Scene::new();
+        scene.push(card().clipped_to(Some(Rect::from_edges(
+            px(0.0),
+            px(0.0),
+            px(100.0),
+            px(50.0),
+        ))));
+        assert!(scene.covers(at(50.0, 25.0), 0.1));
+        assert!(!scene.covers(at(50.0, 75.0), 0.1), "below the clip");
+    }
+
+    #[test]
+    fn a_glyph_covers_the_box_it_was_drawn_in() {
+        let mut scene = Scene::new();
+        scene.push_masked(Masked {
+            clip: None,
+            bounds: Rect::from_edges(px(10.0), px(10.0), px(20.0), px(24.0)),
+            uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
+            colour: Rgba::hex(0xffffff),
+        });
+        assert!(scene.covers(at(15.0, 15.0), 0.1));
+        assert!(!scene.covers(at(40.0, 15.0), 0.1));
+    }
+
+    #[test]
+    fn a_border_on_a_see_through_box_still_catches() {
+        let mut scene = Scene::new();
+        scene.push(
+            Quad::new(card().bounds, Background::Solid(Rgba::TRANSPARENT)).with_border(Border {
+                width: px(2.0),
+                colour: Rgba::hex(0xffffff),
+            }),
+        );
+        assert!(scene.covers(at(50.0, 50.0), 0.1));
     }
 }
