@@ -145,6 +145,21 @@ impl TextSystem {
         wrap: Option<DevicePixels>,
         colour: Rgba,
     ) -> (DevicePixels, DevicePixels) {
+        self.draw_clipped(scene, text, font, at, wrap, colour, None)
+    }
+
+    /// As [`Self::draw`], with nothing outside `clip` drawn.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_clipped(
+        &mut self,
+        scene: &mut Scene,
+        text: &str,
+        font: &Font,
+        at: Point<DevicePixels>,
+        wrap: Option<DevicePixels>,
+        colour: Rgba,
+        clip: Option<wisp_core::geometry::Rect<DevicePixels>>,
+    ) -> (DevicePixels, DevicePixels) {
         let metrics = Metrics::new(font.size.get(), font.line_height.get());
         let mut buffer = Buffer::new(&mut self.fonts, metrics);
         buffer.set_size(wrap.map(|w| w.get()), None);
@@ -174,6 +189,7 @@ impl TextSystem {
                 let x = physical.x as f32 + left as f32;
                 let y = physical.y as f32 - top as f32;
                 scene.push_masked(Masked {
+                    clip,
                     bounds: Rect::from_edges(
                         DevicePixels(x),
                         DevicePixels(y),

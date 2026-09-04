@@ -171,6 +171,12 @@ impl Shadow {
 /// between the two come from.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Quad {
+    /// Nothing outside this is drawn, shadow included.
+    ///
+    /// A rectangle rather than a stack of them: everything that scrolls in an
+    /// interface is a rectangle, and a general clip path would be a second
+    /// rasteriser to keep in step with the first.
+    pub clip: Option<Rect<DevicePixels>>,
     pub bounds: Rect<DevicePixels>,
     pub background: Background,
     pub corners: Corners,
@@ -181,6 +187,7 @@ pub struct Quad {
 impl Quad {
     pub fn new(bounds: Rect<DevicePixels>, background: Background) -> Self {
         Self {
+            clip: None,
             bounds,
             background,
             corners: Corners::NONE,
@@ -201,6 +208,12 @@ impl Quad {
 
     pub fn with_shadow(mut self, shadow: Shadow) -> Self {
         self.shadow = Some(shadow);
+        self
+    }
+
+    /// Nothing outside `clip` is drawn.
+    pub fn clipped_to(mut self, clip: Option<Rect<DevicePixels>>) -> Self {
+        self.clip = clip;
         self
     }
 
@@ -244,6 +257,8 @@ impl Quad {
 /// glyph cache is worth having.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Masked {
+    /// Nothing outside this is drawn. `None` for no clipping.
+    pub clip: Option<Rect<DevicePixels>>,
     /// Where it goes, in device pixels. Fractional, like everything else: a
     /// glyph snapped to a whole pixel is a line of text that jitters as it
     /// scrolls.
@@ -276,7 +291,12 @@ impl Scene {
     /// whichever renderer is used, and so that a scene can be asserted about in
     /// a test without a device.
     pub fn push(&mut self, quad: Quad) -> &mut Self {
-        if !quad.is_invisible() {
+        // A quad entirely outside its own clip cannot put a pixel anywhere, and
+        // a scrolled list is mostly made of those.
+        let clipped_away = quad
+            .clip
+            .is_some_and(|clip| !quad.painted_bounds().intersects(&clip));
+        if !quad.is_invisible() && !clipped_away {
             self.quads.push(quad);
         }
         self
@@ -284,7 +304,10 @@ impl Scene {
 
     /// Adds something drawn from the mask atlas, unless it is invisible.
     pub fn push_masked(&mut self, masked: Masked) -> &mut Self {
-        if !masked.colour.is_transparent() && !masked.bounds.is_empty() {
+        let clipped_away = masked
+            .clip
+            .is_some_and(|clip| !masked.bounds.intersects(&clip));
+        if !masked.colour.is_transparent() && !masked.bounds.is_empty() && !clipped_away {
             self.masked.push(masked);
         }
         self

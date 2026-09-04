@@ -8,10 +8,10 @@ with that content**, and is paced by the display rather than by a timer.
 The core underneath it is general purpose. The overlay case is what it is
 for.
 
-> **Status: early.** You can build a window with it: layout, text, pointer
-> input and a design system all work and are tested. There is no text *entry*
-> yet, no scrolling, and — the thing it is named for — no overlay. See
-> [Where this is](#where-this-is) before depending on it.
+> **Status: early.** You can build a real window with it — layout, text,
+> typing in any language, scrolling, pointer input and a design system all work
+> and are tested. What is missing is the thing it is named for: the overlay.
+> See [Where this is](#where-this-is).
 
 ```sh
 cargo run --example chat -p wisp      # a chat window, built out of the toolkit
@@ -56,8 +56,8 @@ each of these bugs first:
 | layout | **done** — flexbox on `taffy`, with `Fill` meaning *the space that is left* along an axis and *all of it* across one, which is the distinction a sidebar beside a pane lives or dies on |
 | a design system | **done** — a named type scale and surface ramp, with tests that neighbouring steps stay far enough apart to be seen. Most toolkits leave this to the application and most applications never get to it |
 | pointer input | **done** — hover, press and click, hit-tested against the frame that was drawn. A click is a press and a release on the same box, so sliding off one and letting go cancels |
-| text entry, focus, IME | not started, and the hardest thing left. Hangul composition is a requirement rather than a later chore |
-| scrolling | not started |
+| text entry, focus, IME | **done** — a grapheme-aware editor, click to focus, and composition through the system's input method, so Korean, Japanese and Chinese all work without this library composing anything itself |
+| scrolling | **done** — a box that keeps its size, cuts what reaches past it, and takes the wheel from whichever scrolling box the pointer is over |
 | the overlay itself: click-through, hit masks, following its content | not started, and it is the whole point — everything above is the floor it needs |
 
 The milestone that decides whether any of this worked is porting a real desktop

@@ -18,7 +18,7 @@ pub struct Message {
 }
 
 pub fn opening() -> Vec<Message> {
-    vec![
+    let mut said = vec![
         Message {
             from: "you".into(),
             body: "왜 라이트 테마에서 카드가 안 보였어?".into(),
@@ -29,7 +29,24 @@ pub fn opening() -> Vec<Message> {
                    가까워지니 아래 단계가 자리를 비켜줘야 합니다. 팔레트 테스트가 잡았습니다."
                 .into(),
         },
-    ]
+    ];
+    // Enough to overflow the window, so that the transcript has something to
+    // scroll.
+    for round in 1..=4 {
+        said.push(Message {
+            from: "you".into(),
+            body: format!("Round {round}: does the transcript scroll?"),
+        });
+        said.push(Message {
+            from: "puck".into(),
+            body: format!(
+                "Round {round}: it does, and the composer stays where it is. \
+                 Rows past the end of the box are cut at its edge rather than \
+                 drawn over the status bar."
+            ),
+        });
+    }
+    said
 }
 
 /// The whole window, so that a snapshot can build the same one.
@@ -156,7 +173,17 @@ fn conversation(theme: &Theme, ui: &Ui, messages: &[Message], line: Element) -> 
         .padding(Edges::axes(24.0, 24.0))
         .gap(20.0)
         .cross(wisp::Place::Centre)
-        .child(thread)
+        .child(
+            // The transcript scrolls; the composer does not go with it. Both
+            // halves of that matter: a composer that scrolls off the top is a
+            // composer you have to hunt for.
+            column()
+                .grow(1.0)
+                .size(Sizing::Fill, Sizing::Fill)
+                .cross(wisp::Place::Centre)
+                .scroll("transcript")
+                .child(thread),
+        )
         .child(composer(theme, ui, line))
 }
 

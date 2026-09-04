@@ -1,4 +1,5 @@
 use bytemuck::{Pod, Zeroable};
+use wisp_core::geometry::Rect;
 use wisp_core::scene::{Background, Quad as SceneQuad};
 use wisp_core::{DevicePixels, Rgba, Scene};
 
@@ -30,6 +31,22 @@ struct GpuQuad {
     params: [f32; 4],
     /// shadow offset x, y, then the gradient's direction as a unit vector
     shadow_offset_and_gradient: [f32; 4],
+    /// left, top, right, bottom
+    clip: [f32; 4],
+}
+
+/// What a primitive with no clip is given.
+///
+/// A rectangle nothing can fall outside, rather than a flag: a branch in a
+/// fragment shader costs more than four floats, and every primitive carries
+/// the four floats either way.
+const UNCLIPPED: [f32; 4] = [f32::MIN, f32::MIN, f32::MAX, f32::MAX];
+
+fn clip_of(clip: Option<Rect<DevicePixels>>) -> [f32; 4] {
+    match clip {
+        Some(c) => [px(c.left()), px(c.top()), px(c.right()), px(c.bottom())],
+        None => UNCLIPPED,
+    }
 }
 
 /// Colours reach the shader linearised.
@@ -55,6 +72,7 @@ struct GpuMasked {
     bounds: [f32; 4],
     uv: [f32; 4],
     colour: [f32; 4],
+    clip: [f32; 4],
 }
 
 /// What a renderer draws onto: a configured surface and its size.
@@ -385,6 +403,7 @@ impl Renderer {
                 ],
                 uv: [m.uv.left(), m.uv.top(), m.uv.right(), m.uv.bottom()],
                 colour: rgba(m.colour),
+                clip: clip_of(m.clip),
             })
             .collect();
         self.upload(&quads, &ramps, size);
@@ -569,6 +588,7 @@ impl Renderer {
             shadow_colour,
             params: [border_width, blur, spread, row],
             shadow_offset_and_gradient: [offset[0], offset[1], direction[0], direction[1]],
+            clip: clip_of(quad.clip),
         }
     }
 

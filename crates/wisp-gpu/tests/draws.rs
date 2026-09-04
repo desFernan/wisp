@@ -382,6 +382,7 @@ gpu_test!(a_mask_is_drawn_in_the_colour_it_was_given, h, {
 
     let mut scene = Scene::new();
     scene.push_masked(Masked {
+        clip: None,
         bounds: box_at(0.0, 0.0, 64.0, 64.0),
         uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
         colour: Rgba::hex(0xff0000),
@@ -413,6 +414,7 @@ gpu_test!(a_mask_is_drawn_over_the_quads_under_it, h, {
         Background::Solid(Rgba::hex(0x0000ff)),
     ));
     scene.push_masked(Masked {
+        clip: None,
         bounds: box_at(16.0, 16.0, 48.0, 48.0),
         uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
         colour: Rgba::hex(0x00ff00),
@@ -438,6 +440,7 @@ gpu_test!(a_half_covered_pixel_is_half_there, h, {
 
     let mut scene = Scene::new();
     scene.push_masked(Masked {
+        clip: None,
         bounds: box_at(0.0, 0.0, 64.0, 64.0),
         uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
         colour: Rgba::hex(0xffffff),
@@ -448,4 +451,45 @@ gpu_test!(a_half_covered_pixel_is_half_there, h, {
         (100..=155).contains(&alpha),
         "half coverage came out as {alpha}"
     );
+});
+
+gpu_test!(nothing_is_drawn_outside_a_clip, h, {
+    // What makes scrolling possible: a box reaching past the end of the thing
+    // holding it is cut at the edge rather than drawn over what is above and
+    // below it.
+    let mut scene = Scene::new();
+    scene.push(
+        Quad::new(
+            box_at(0.0, 0.0, 64.0, 64.0),
+            Background::Solid(Rgba::hex(0xff0000)),
+        )
+        .clipped_to(Some(box_at(0.0, 0.0, 64.0, 32.0))),
+    );
+    let pixels = h.draw(&scene);
+
+    assert!(
+        close(at(&pixels, 32, 16), [255, 0, 0, 255]),
+        "inside the clip"
+    );
+    assert_eq!(at(&pixels, 32, 48)[3], 0, "below the clip should be empty");
+    // And the boundary belongs to the half that is drawn.
+    assert!(at(&pixels, 32, 31)[3] > 0);
+    assert_eq!(at(&pixels, 32, 32)[3], 0);
+});
+
+gpu_test!(a_clip_cuts_a_mask_too, h, {
+    let side = 2u32;
+    h.renderer
+        .upload_coverage(side, &[255; 4], Some((0, 0, side, side)));
+
+    let mut scene = Scene::new();
+    scene.push_masked(Masked {
+        clip: Some(box_at(0.0, 0.0, 32.0, 64.0)),
+        bounds: box_at(0.0, 0.0, 64.0, 64.0),
+        uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
+        colour: Rgba::hex(0xffffff),
+    });
+    let pixels = h.draw(&scene);
+    assert!(at(&pixels, 16, 32)[3] > 0, "inside the clip");
+    assert_eq!(at(&pixels, 48, 32)[3], 0, "outside it");
 });

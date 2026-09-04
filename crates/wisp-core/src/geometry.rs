@@ -61,6 +61,38 @@ impl<U: Copy + std::ops::Sub<Output = U>> Rect<U> {
 
 /// The four edges, for any unit -- including a plain `f32`, which is what
 /// texture coordinates and hit testing are measured in.
+impl<U: Copy + std::ops::Add<Output = U> + std::ops::Sub<Output = U> + PartialOrd> Rect<U> {
+    fn lower(a: U, b: U) -> U {
+        if a < b { a } else { b }
+    }
+
+    fn higher(a: U, b: U) -> U {
+        if a > b { a } else { b }
+    }
+
+    pub fn intersects(&self, other: &Self) -> bool {
+        self.left() < other.right()
+            && other.left() < self.right()
+            && self.top() < other.bottom()
+            && other.top() < self.bottom()
+    }
+
+    /// The overlap, or `None` when there is not one.
+    ///
+    /// `None` rather than an empty rectangle: an empty rectangle invites being
+    /// drawn, and a zero-sized draw call is a waste that looks like work.
+    pub fn intersection(&self, other: &Self) -> Option<Self> {
+        self.intersects(other).then(|| {
+            Self::from_edges(
+                Self::higher(self.left(), other.left()),
+                Self::higher(self.top(), other.top()),
+                Self::lower(self.right(), other.right()),
+                Self::lower(self.bottom(), other.bottom()),
+            )
+        })
+    }
+}
+
 impl<U: Copy + std::ops::Add<Output = U> + PartialOrd> Rect<U> {
     /// Half-open on the right and bottom, so two rectangles laid edge to edge
     /// do not both claim the line between them.
@@ -98,29 +130,6 @@ macro_rules! rect_maths {
                     self.origin.x + self.size.width / 2.0,
                     self.origin.y + self.size.height / 2.0,
                 )
-            }
-
-            pub fn intersects(&self, other: &Self) -> bool {
-                self.left() < other.right()
-                    && other.left() < self.right()
-                    && self.top() < other.bottom()
-                    && other.top() < self.bottom()
-            }
-
-            /// The overlap, or `None` when there is not one.
-            ///
-            /// `None` rather than an empty rectangle: an empty rectangle
-            /// invites being drawn, and a zero-sized draw call is a waste that
-            /// looks like work.
-            pub fn intersection(&self, other: &Self) -> Option<Self> {
-                self.intersects(other).then(|| {
-                    Self::from_edges(
-                        self.left().max(other.left()),
-                        self.top().max(other.top()),
-                        self.right().min(other.right()),
-                        self.bottom().min(other.bottom()),
-                    )
-                })
             }
 
             /// Grown on every side. A negative amount shrinks it, and it stops

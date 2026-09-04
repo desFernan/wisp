@@ -26,6 +26,11 @@ struct Quad {
     // Where the shadow sits relative to the quad, and the direction of the
     // gradient as a unit vector.
     shadow_offset_and_gradient: vec4<f32>,
+    // Nothing outside this rectangle is drawn: left, top, right, bottom. A
+    // scrolled list is a stack of boxes reaching past the end of the thing
+    // holding them, and this is what stops them being drawn over what is
+    // above and below it.
+    clip: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -101,6 +106,10 @@ fn fill_at(quad: Quad, point: vec2<f32>) -> vec4<f32> {
 @fragment
 fn fragment(in: Vertex) -> @location(0) vec4<f32> {
     let quad = quads[in.index];
+    if (in.point.x < quad.clip.x || in.point.x >= quad.clip.z
+        || in.point.y < quad.clip.y || in.point.y >= quad.clip.w) {
+        discard;
+    }
     let centre = quad.bounds.xy + quad.bounds.zw * 0.5;
     let half = quad.bounds.zw * 0.5;
     let local = in.point - centre;

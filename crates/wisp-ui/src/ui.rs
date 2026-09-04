@@ -85,6 +85,10 @@ pub struct Ui {
     /// is not one of these puts the keyboard down.
     fields: HashSet<Id>,
     seen: HashSet<Id>,
+    /// How far each scrolling box has been scrolled, in points.
+    scrolls: HashMap<Id, f32>,
+    /// Wheel movement since the last frame, in points.
+    wheel: f32,
     /// Whether a click finished this frame, wherever it landed.
     ///
     /// Not the same question as which box was clicked: most of a window is
@@ -111,6 +115,8 @@ impl Ui {
             pending: Vec::new(),
             fields: HashSet::new(),
             seen: HashSet::new(),
+            scrolls: HashMap::new(),
+            wheel: 0.0,
             released: false,
         }
     }
@@ -133,6 +139,12 @@ impl Ui {
     /// Where the pointer is and whether its button is down, in points.
     pub fn point(&mut self, pointer: Pointer) {
         self.pointer = pointer;
+    }
+
+    /// The wheel turned, in points. Positive scrolls the content up, the way
+    /// every list on this platform does.
+    pub fn wheel(&mut self, by: f32) {
+        self.wheel += by;
     }
 
     /// Something the keyboard or the input method did.
@@ -183,7 +195,7 @@ impl Ui {
         // than its own text, which wraps the last letter onto its own line.
         tree.disable_rounding();
         // The root has no parent, and fills the window either way.
-        let node = self.build(&mut tree, root, Axis::Column);
+        let node = self.build(&mut tree, root, Axis::Column, false);
         // Pinned to the window rather than left to ask for a share of a parent
         // it does not have. Without this a root that says it fills the window
         // is laid out at the height of its own contents and everything below
@@ -250,7 +262,17 @@ impl Ui {
         }
 
         let mut painted = Vec::new();
-        self.paint(&tree, node, root, (0.0, 0.0), scale, scene, &mut painted);
+        self.apply_wheel(&tree, node, root, (0.0, 0.0));
+        self.paint(
+            &tree,
+            node,
+            root,
+            (0.0, 0.0),
+            scale,
+            scene,
+            &mut painted,
+            None,
+        );
         self.last = self.resolve(painted);
 
         // Clicking anything that is not a field puts the keyboard down. The
@@ -278,8 +300,14 @@ impl Ui {
     }
 
     /// Mirrors the element tree into taffy, measuring text as it goes.
-    fn build(&mut self, tree: &mut TaffyTree<Label>, element: &Element, along: Axis) -> NodeId {
-        let style = to_taffy(element, along);
+    fn build(
+        &mut self,
+        tree: &mut TaffyTree<Label>,
+        element: &Element,
+        along: Axis,
+        inside_scroll: bool,
+    ) -> NodeId {
+        let style = to_taffy(element, along, inside_scroll);
         if let Some(label) = element.label.as_ref() {
             return tree
                 .new_leaf_with_context(style, label.clone())
@@ -288,7 +316,7 @@ impl Ui {
         let children: Vec<NodeId> = element
             .children
             .iter()
-            .map(|child| self.build(tree, child, element.style.axis))
+            .map(|child| self.build(tree, child, element.style.axis, element.style.scroll))
             .collect();
         tree.new_with_children(style, &children)
             .expect("a node with children is always makeable")
@@ -306,6 +334,7 @@ impl Ui {
         scale: Scale,
         scene: &mut Scene,
         painted: &mut Vec<(Id, Rect<f32>)>,
+        clip: Option<Rect<f32>>,
     ) {
         let layout = tree.layout(node).expect("laid out above");
         let at = (offset.0 + layout.location.x, offset.1 + layout.location.y);
@@ -319,6 +348,31 @@ impl Ui {
         if let Some(id) = element.id {
             painted.push((id, bounds));
         }
+
+        // A scrolling box cuts everything inside it at its own edges, and
+        // inside a box that is already cut, at the overlap -- otherwise a list
+        // inside a panel spills past the panel the moment the panel scrolls.
+        let (clip, child_offset) = if element.style.scroll {
+            let inner = match clip {
+                Some(outer) => outer.intersection(&bounds).unwrap_or(Rect::default()),
+                None => bounds,
+            };
+            let scrolled = element
+                .id
+                .and_then(|id| self.scrolls.get(&id).copied())
+                .unwrap_or(0.0);
+            (Some(inner), (at.0, at.1 - scrolled))
+        } else {
+            (clip, at)
+        };
+        let device_clip = clip.map(|c| {
+            Rect::from_edges(
+                DevicePixels(c.left() * scale.factor()),
+                DevicePixels(c.top() * scale.factor()),
+                DevicePixels(c.right() * scale.factor()),
+                DevicePixels(c.bottom() * scale.factor()),
+            )
+        });
 
         let style = &element.style;
         if style.background.is_some() || style.border.is_some() || style.shadow.is_some() {
@@ -342,12 +396,12 @@ impl Ui {
             if let Some(shadow) = style.shadow {
                 quad = quad.with_shadow(shadow);
             }
-            scene.push(quad);
+            scene.push(quad.clipped_to(device_clip));
         }
 
         if let Some(label) = element.label.as_ref() {
             let font = label.role.font(scale);
-            self.text.draw(
+            self.text.draw_clipped(
                 scene,
                 &label.text,
                 &font,
@@ -363,13 +417,55 @@ impl Ui {
                 // letter onto a second line.
                 Some(DevicePixels((bounds.size.width + 0.5) * scale.factor())),
                 label.colour,
+                device_clip,
             );
         }
 
         let children = tree.children(node).unwrap_or_default();
         for (child_node, child) in children.into_iter().zip(element.children.iter()) {
-            self.paint(tree, child_node, child, at, scale, scene, painted);
+            self.paint(
+                tree,
+                child_node,
+                child,
+                child_offset,
+                scale,
+                scene,
+                painted,
+                clip,
+            );
         }
+    }
+
+    /// Gives the wheel to the innermost scrolling box under the pointer.
+    ///
+    /// Innermost, because a list inside a panel inside a window is three boxes
+    /// that could all take it, and the one you are pointing at is the one you
+    /// meant. Walking the tree finds it in painting order, and the last match
+    /// is the deepest.
+    fn apply_wheel(
+        &mut self,
+        tree: &TaffyTree<Label>,
+        node: NodeId,
+        element: &Element,
+        offset: (f32, f32),
+    ) {
+        if self.wheel == 0.0 {
+            return;
+        }
+        let mut target = None;
+        collect_scrollables(tree, node, element, offset, &mut target, self.pointer.at);
+        let Some((id, room)) = target else {
+            // Nothing under the pointer scrolls. Dropped rather than saved for
+            // later: a wheel turn is about where the pointer is now.
+            self.wheel = 0.0;
+            return;
+        };
+        let at = self.scrolls.entry(id).or_insert(0.0);
+        // Clamped to what there is. Rubber-banding past the end is a platform
+        // convention rather than a layout question, and guessing at it here
+        // would be wrong on at least one platform.
+        *at = (*at - self.wheel).clamp(0.0, room.max(0.0));
+        self.wheel = 0.0;
     }
 
     /// Turns the frame's boxes and the pointer's state into answers.
@@ -456,7 +552,7 @@ fn along(s: Sizing) -> Dimension {
     }
 }
 
-fn to_taffy(element: &Element, parent: Axis) -> taffy::Style {
+fn to_taffy(element: &Element, parent: Axis, inside_scroll: bool) -> taffy::Style {
     let s = &element.style;
     let (main, cross) = match parent {
         Axis::Row => (s.width, s.height),
@@ -472,11 +568,25 @@ fn to_taffy(element: &Element, parent: Axis) -> taffy::Style {
     } else {
         s.grow
     };
-    let shrink = if matches!(main, Sizing::Fixed(_)) {
+    // Inside a scrolling box, nothing gives way. Flexbox's instinct is to
+    // squash the contents until they fit, which for a scrolling box is the
+    // opposite of the point: there would be nothing to scroll, because
+    // everything already fits.
+    let shrink = if inside_scroll || matches!(main, Sizing::Fixed(_)) {
         0.0
     } else {
         1.0
     };
+    // A paragraph in a column takes the column's width. Left to size itself it
+    // measures unwrapped -- one very long line -- so the box around it is built
+    // for one line while the paint wraps to three, and the next thing down is
+    // drawn over it.
+    //
+    // In a row it is left alone: a label beside a button is a word, not a
+    // paragraph, and stretching it there would push the button off the end.
+    let stretch_text = element.label.is_some()
+        && parent == Axis::Column
+        && matches!(element.style.width, Sizing::Hug);
     taffy::Style {
         display: Display::Flex,
         flex_direction: match s.axis {
@@ -498,6 +608,16 @@ fn to_taffy(element: &Element, parent: Axis) -> taffy::Style {
             width: LengthPercentageAuto::length(s.min.0),
             height: LengthPercentageAuto::length(s.min.1),
         },
+        // Deliberately not taffy's `Overflow::Scroll`. Turning it on changes
+        // how the contents are measured -- a paragraph inside one came back
+        // sized for a single unwrapped line, so the box drawn around it was
+        // one line tall and the text ran out of the bottom and under the next
+        // message. Cutting and offsetting is done here instead, and the
+        // clipping was already this library's job.
+        //
+        // What a scrolling box does need is a definite height, which is what
+        // gives its contents somewhere to overflow *from*.
+        align_self: stretch_text.then_some(taffy::AlignSelf::STRETCH),
         align_items: place(s.cross),
         justify_content: justify(s.main),
         flex_grow: grow,
@@ -683,4 +803,45 @@ fn composing(what: &str, theme: &Theme, role: Role) -> Element {
         })
         .border(0.0, theme.accent)
         .child(text(what.to_string(), role, theme.accent))
+}
+
+/// The innermost scrolling box under `point`, and how far it can scroll.
+fn collect_scrollables(
+    tree: &TaffyTree<Label>,
+    node: NodeId,
+    element: &Element,
+    offset: (f32, f32),
+    found: &mut Option<(Id, f32)>,
+    point: (f32, f32),
+) {
+    let Ok(layout) = tree.layout(node) else {
+        return;
+    };
+    let at = (offset.0 + layout.location.x, offset.1 + layout.location.y);
+    let bounds = Rect::from_edges(
+        at.0,
+        at.1,
+        at.0 + layout.size.width,
+        at.1 + layout.size.height,
+    );
+    if element.style.scroll
+        && let Some(id) = element.id
+        && bounds.contains(Point::new(point.0, point.1))
+    {
+        // How much taller the contents are than the box holding them, measured
+        // from the children rather than asked of taffy: they are laid out
+        // normally and simply reach past the end.
+        let content = tree
+            .children(node)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|child| tree.layout(child).ok())
+            .map(|child| child.location.y + child.size.height)
+            .fold(0.0f32, f32::max);
+        *found = Some((id, content - layout.size.height));
+    }
+    let children = tree.children(node).unwrap_or_default();
+    for (child_node, child) in children.into_iter().zip(element.children.iter()) {
+        collect_scrollables(tree, child_node, child, at, found, point);
+    }
 }

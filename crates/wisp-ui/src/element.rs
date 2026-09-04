@@ -98,6 +98,8 @@ pub struct Style {
     pub shadow: Option<Shadow>,
     /// Minimum size along each axis, in points.
     pub min: (f32, f32),
+    /// Whether this box scrolls its contents rather than growing to fit them.
+    pub scroll: bool,
 }
 
 impl Default for Style {
@@ -116,6 +118,7 @@ impl Default for Style {
             border: None,
             shadow: None,
             min: (0.0, 0.0),
+            scroll: false,
         }
     }
 }
@@ -277,6 +280,17 @@ impl Element {
 
     pub fn shadow(mut self, shadow: Shadow) -> Self {
         self.style.shadow = Some(shadow);
+        self
+    }
+
+    /// Keeps its own size and scrolls what is inside it.
+    ///
+    /// Named, because where it has been scrolled to has to survive the frame
+    /// being rebuilt -- and everything else in this tree is thrown away every
+    /// frame on purpose.
+    pub fn scroll(mut self, id: &'static str) -> Self {
+        self.style.scroll = true;
+        self.id = Some(Id(id));
         self
     }
 

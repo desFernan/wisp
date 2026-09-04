@@ -217,6 +217,19 @@ impl<F: FnMut(&mut Ui, &Frame) -> Element> ApplicationHandler for App<F> {
             WindowEvent::CursorLeft { .. } => {
                 self.pointer.at = (f32::MIN, f32::MIN);
             }
+            WindowEvent::MouseWheel { delta, .. } => {
+                // A line is not a pixel. A wheel with detents reports lines and
+                // a trackpad reports points, and treating a line as a point
+                // makes a wheel scroll a list by one row an hour.
+                const LINE: f32 = 24.0;
+                let by = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, lines) => lines * LINE,
+                    winit::event::MouseScrollDelta::PixelDelta(at) => {
+                        at.y as f32 / state.window.scale_factor() as f32
+                    }
+                };
+                self.ui.wheel(by);
+            }
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers.state();
             }

@@ -5,7 +5,7 @@
 //! from the renderer.
 
 use wisp_core::{Rgba, Scale, Scene};
-use wisp_ui::element::{Edges, Sizing};
+use wisp_ui::element::{Edges, Element, Sizing};
 use wisp_ui::{Pointer, Role, Theme, Ui, column, div, row, spacer, text};
 
 fn ui() -> (Ui, Scene) {
@@ -467,4 +467,134 @@ fn keystrokes_nobody_was_listening_for_are_dropped() {
     focus_the_field(&mut ui, &mut scene, &mut editor);
     typed(&mut ui, &mut scene, &mut editor, OnEnter::Submit);
     assert_eq!(editor.text(), "");
+}
+
+// --- scrolling --------------------------------------------------------------
+
+/// A short box with a tall stack of rows inside it.
+fn tall(rows: usize) -> Element {
+    let mut list = column().size(Sizing::Fill, Sizing::Hug).gap(0.0);
+    for _ in 0..rows {
+        list = list.child(
+            div()
+                .size(Sizing::Fill, Sizing::Fixed(20.0))
+                .background(Theme::dark().raised),
+        );
+    }
+    column()
+        .size(Sizing::Fixed(100.0), Sizing::Fixed(100.0))
+        .scroll("list")
+        .child(list.id("content"))
+}
+
+#[test]
+fn a_scrolling_box_keeps_its_own_size_however_tall_its_contents_are() {
+    let (mut ui, mut scene) = ui();
+    let tree = tall(20);
+    let seen = ui.frame(&tree, (400.0, 400.0), Scale::ONE, &mut scene);
+    assert_eq!(seen.bounds("list").unwrap().size.height, 100.0);
+}
+
+#[test]
+fn the_wheel_moves_the_contents_and_not_the_box() {
+    let (mut ui, mut scene) = ui();
+    let tree = tall(20);
+
+    ui.point(Pointer {
+        at: (50.0, 50.0),
+        down: false,
+    });
+    let before = ui.frame(&tree, (400.0, 400.0), Scale::ONE, &mut scene);
+    let top_before = before.bounds("content").unwrap().top();
+
+    scene.clear();
+    ui.wheel(-40.0);
+    let after = ui.frame(&tree, (400.0, 400.0), Scale::ONE, &mut scene);
+    assert_eq!(
+        after.bounds("list").unwrap().top(),
+        0.0,
+        "the box stayed put"
+    );
+    assert_eq!(
+        after.bounds("content").unwrap().top(),
+        top_before - 40.0,
+        "the contents should have moved up"
+    );
+}
+
+#[test]
+fn scrolling_stops_at_both_ends() {
+    let (mut ui, mut scene) = ui();
+    let tree = tall(20); // 400 points of content in a 100 point box.
+    ui.point(Pointer {
+        at: (50.0, 50.0),
+        down: false,
+    });
+    ui.frame(&tree, (400.0, 400.0), Scale::ONE, &mut scene);
+
+    scene.clear();
+    ui.wheel(1000.0);
+    let up = ui.frame(&tree, (400.0, 400.0), Scale::ONE, &mut scene);
+    assert_eq!(
+        up.bounds("content").unwrap().top(),
+        0.0,
+        "cannot go above the top"
+    );
+
+    scene.clear();
+    ui.wheel(-10_000.0);
+    let down = ui.frame(&tree, (400.0, 400.0), Scale::ONE, &mut scene);
+    assert_eq!(
+        down.bounds("content").unwrap().top(),
+        -300.0,
+        "the last row should sit at the bottom edge, and no further"
+    );
+}
+
+#[test]
+fn the_wheel_goes_to_the_box_it_is_pointing_at() {
+    let (mut ui, mut scene) = ui();
+    let tree = row()
+        .child(tall(20))
+        .child(column().size(Sizing::Fixed(100.0), Sizing::Fixed(100.0)));
+
+    // Pointing at the empty half.
+    ui.point(Pointer {
+        at: (150.0, 50.0),
+        down: false,
+    });
+    ui.frame(&tree, (400.0, 400.0), Scale::ONE, &mut scene);
+    scene.clear();
+    ui.wheel(-40.0);
+    let seen = ui.frame(&tree, (400.0, 400.0), Scale::ONE, &mut scene);
+    assert_eq!(
+        seen.bounds("content").unwrap().top(),
+        0.0,
+        "a list nobody is pointing at should not have moved"
+    );
+}
+
+#[test]
+fn nothing_outside_a_scrolling_box_is_drawn() {
+    // The whole reason a scrolling box needs the renderer's help: rows past
+    // the end of it are laid out, and would be painted over whatever is below
+    // it.
+    let (mut ui, mut scene) = ui();
+    let tree = column()
+        .size(Sizing::Fill, Sizing::Fill)
+        .child(tall(20))
+        .child(div().size(Sizing::Fill, Sizing::Fixed(50.0)).id("below"));
+    ui.frame(&tree, (400.0, 400.0), Scale::ONE, &mut scene);
+
+    let clipped = scene.quads().iter().filter(|q| q.clip.is_some()).count();
+    assert!(
+        clipped > 0,
+        "the rows inside the scrolling box should be clipped"
+    );
+    let clip = scene
+        .quads()
+        .iter()
+        .find_map(|q| q.clip)
+        .expect("at least one");
+    assert_eq!(clip.bottom().get(), 100.0, "cut at the box's own edge");
 }

@@ -17,6 +17,8 @@ struct Masked {
     // Where to read it from, as texture coordinates: min then max.
     uv: vec4<f32>,
     colour: vec4<f32>,
+    /// left, top, right, bottom. Outside it, nothing.
+    clip: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -28,6 +30,7 @@ struct Vertex {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) @interpolate(flat) index: u32,
+    @location(2) point: vec2<f32>,
 };
 
 const CORNERS = array<vec2<f32>, 6>(
@@ -50,12 +53,17 @@ fn vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance:
     );
     out.uv = mix(item.uv.xy, item.uv.zw, corner);
     out.index = instance;
+    out.point = point;
     return out;
 }
 
 @fragment
 fn fragment(in: Vertex) -> @location(0) vec4<f32> {
     let item = items[in.index];
+    if (in.point.x < item.clip.x || in.point.x >= item.clip.z
+        || in.point.y < item.clip.y || in.point.y >= item.clip.w) {
+        discard;
+    }
     let mask = textureSample(coverage, coverage_sampler, in.uv).r;
     let alpha = item.colour.a * mask;
     // Premultiplied, matching the rest of the frame. Straight alpha here is
