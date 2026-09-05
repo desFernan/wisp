@@ -5,6 +5,9 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.0.1"
 edition = "2024"
+# Let-chains and `as_chunks` are both 1.88. Written down rather than inferred
+# from the edition, which would say 1.85 and be wrong.
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/desFernan/wisp"
 homepage = "https://github.com/desFernan/wisp"
