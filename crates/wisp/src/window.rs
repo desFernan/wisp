@@ -393,7 +393,7 @@ impl<F: FnMut(&mut Ui, &Frame<'_>) -> Element> ApplicationHandler for App<F> {
                 // pointer was when it stopped listening.
                 #[cfg(target_os = "macos")]
                 if self.options.manage_click_through
-                    && let Some(overlay) = state.overlay.as_mut()
+                    && let Some(overlay) = state.overlay.as_ref()
                     && let (Some(cursor), Some(frame)) = (overlay.cursor(), overlay.frame())
                 {
                     let local = wisp_core::geometry::Point::new(

@@ -15,7 +15,12 @@ use wisp_core::geometry::Rect;
 /// is a window that lands mirrored about the middle of the screen.
 pub struct Overlay {
     window: Retained<NSWindow>,
-    click_through: bool,
+    /// The flag as last set, so that an unchanged one is not set again.
+    ///
+    /// A cell rather than a field behind `&mut`: this is asked and answered
+    /// while a frame is being drawn, and the frame holds the window by shared
+    /// reference. Everything AppKit needs here is `&self` anyway.
+    click_through: std::cell::Cell<bool>,
 }
 
 impl Overlay {
@@ -36,7 +41,7 @@ impl Overlay {
         let window = view.window()?;
         Some(Self {
             window,
-            click_through: false,
+            click_through: std::cell::Cell::new(false),
         })
     }
 
@@ -69,15 +74,15 @@ impl Overlay {
     /// Set from the scene every frame. The window server honours it about a
     /// refresh later, which is why nothing here should read it back and expect
     /// an answer immediately.
-    pub fn set_click_through(&mut self, through: bool) {
-        if self.click_through != through {
-            self.click_through = through;
+    pub fn set_click_through(&self, through: bool) {
+        if self.click_through.get() != through {
+            self.click_through.set(through);
             self.window.setIgnoresMouseEvents(through);
         }
     }
 
     pub fn is_click_through(&self) -> bool {
-        self.click_through
+        self.click_through.get()
     }
 
     /// The window's number, for `screencapture -l` and for asking the window
