@@ -16,7 +16,6 @@ authors = ["desFernan"]
 # with this problem would actually type into the search box.
 keywords = ["gui", "overlay", "gpu", "wgpu", "transparent"]
 categories = ["gui", "graphics", "rendering"]
-rust-version = "1.85"
 
 [workspace.dependencies]
 wisp-core = { path = "crates/wisp-core", version = "0.0.1" }

@@ -647,8 +647,16 @@ gpu_test!(a_half_transparent_picture_keeps_its_colour, h, {
     ));
     let pixels = h.draw(&scene);
     let got = at(&pixels, 32, 32);
-    assert!((got[3] as i16 - 128).abs() <= 4, "alpha came back {}", got[3]);
+    assert!(
+        (got[3] as i16 - 128).abs() <= 4,
+        "alpha came back {}",
+        got[3]
+    );
     // Over a transparent clear the composited result is the premultiplied
     // colour itself.
-    assert!((got[0] as i16 - 128).abs() <= 6, "colour came back {}", got[0]);
+    assert!(
+        (got[0] as i16 - 128).abs() <= 6,
+        "colour came back {}",
+        got[0]
+    );
 });
