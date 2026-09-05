@@ -28,7 +28,22 @@ cargo run --example overlay -p wisp   # a card over your desktop that clicks fal
 ```
 
 `cargo run --example overlay -- --selftest` asks the window server whether the
-overlay behaves, and quits.
+overlay behaves, and quits:
+
+```
+=== wisp overlay selftest (window 125255) ===
+1. the frame has something and nothing on it -> PASS
+2. a click where something is drawn reaches this window -> PASS (reached=true)
+3. a click where nothing is drawn passes through       -> PASS (reached=false)
+=== all checks passed ===
+```
+
+Checks 2 and 3 are the whole library in two lines. They are not the overlay
+reading its own flags back -- that would pass on a window the compositor is
+quietly ignoring. They warp the real cursor onto a drawn pixel and then onto a
+transparent one and ask the window server which window a click there would
+actually hit, which is an answer that crosses application boundaries and cannot
+be faked from inside.
 
 115 tests.
 
