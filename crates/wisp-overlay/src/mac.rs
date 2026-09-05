@@ -149,6 +149,24 @@ impl Overlay {
         self.window.setFrame_display(frame, true);
     }
 
+    /// The usable area of every display, in the order the system lists them.
+    ///
+    /// Something that walks around the desktop needs to know the desktop is
+    /// more than one rectangle: where a display stops, its neighbour may
+    /// begin, and stopping there is only right when nothing is next to it.
+    pub fn work_areas(&self) -> Vec<Rect<Points>> {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return Vec::new();
+        };
+        let Some(height) = primary_height(mtm) else {
+            return Vec::new();
+        };
+        NSScreen::screens(mtm)
+            .iter()
+            .map(|screen| usable(&screen, height))
+            .collect()
+    }
+
     /// The usable area of the display a point is on -- the screen less the
     /// menu bar and the Dock.
     ///
@@ -170,14 +188,7 @@ impl Overlay {
                     && (top..bottom).contains(&(point.1.get() as f64))
             })
             .or_else(|| NSScreen::mainScreen(mtm))?;
-        let visible = screen.visibleFrame();
-        let top = height - (visible.origin.y + visible.size.height);
-        Some(Rect::from_edges(
-            Points(visible.origin.x as f32),
-            Points(top as f32),
-            Points((visible.origin.x + visible.size.width) as f32),
-            Points((top + visible.size.height) as f32),
-        ))
+        Some(usable(&screen, height))
     }
 
     /// Which window a click at this point would actually reach.
@@ -288,6 +299,19 @@ pub fn mouse_is_down() -> bool {
 /// fails for the wrong reason, and its opposite passes for the wrong reason.
 pub fn can_post_events() -> bool {
     objc2_core_graphics::CGPreflightPostEventAccess()
+}
+
+/// A screen's usable area, in the coordinates everything else here uses:
+/// points down from the top of the primary display.
+fn usable(screen: &NSScreen, height: f64) -> Rect<Points> {
+    let visible = screen.visibleFrame();
+    let top = height - (visible.origin.y + visible.size.height);
+    Rect::from_edges(
+        Points(visible.origin.x as f32),
+        Points(top as f32),
+        Points((visible.origin.x + visible.size.width) as f32),
+        Points((top + visible.size.height) as f32),
+    )
 }
 
 /// The height of the primary display, which every Cocoa coordinate is measured
