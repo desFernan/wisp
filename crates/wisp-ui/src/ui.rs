@@ -18,6 +18,19 @@ use crate::element::{Axis, Edges, Element, Id, Label, Place, Sizing, div, row, t
 use crate::input::{Composition, Input, Key};
 use crate::theme::{Role, Theme};
 
+/// Half a point of slack when deciding where a line wraps.
+///
+/// A box is laid out at the width it reported, and that width comes back
+/// through arithmetic that need not land on the same float. Measured against
+/// the width exactly, a line that fitted when it was measured can fail to fit
+/// when it is laid out, and the last thing on it drops onto a second one.
+///
+/// Latin hides this: there is nowhere to break inside a word, so a box that
+/// hugs one word is safe however the arithmetic lands. Korean and Japanese
+/// break between any two characters, so every line is a candidate and a box
+/// that hugs a short phrase comes out a line too tall.
+const WRAP_SLACK: f32 = 0.5;
+
 /// What the pointer is doing, in points.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Pointer {
@@ -299,7 +312,7 @@ impl Ui {
                 let (w, h) = text.measure_aligned(
                     &label.text,
                     &font,
-                    wrap.map(|w| DevicePixels(w * scale.factor())),
+                    wrap.map(|w| DevicePixels((w + WRAP_SLACK) * scale.factor())),
                     label.align,
                 );
                 taffy::tree::LayoutOutput::from_outer_size(taffy::Size {
@@ -497,12 +510,10 @@ impl Ui {
                     DevicePixels(bounds.top() * scale.factor()),
                 ),
                 // Wrapped at the width it was actually given, which is not
-                // always the width it asked for. Half a point of slack: the
-                // measurement and the layout are separate floating point
-                // journeys to the same number, and a label that comes back a
-                // ten-thousandth narrower than it measured drops its last
-                // letter onto a second line.
-                Some(DevicePixels((bounds.size.width + 0.5) * scale.factor())),
+                // always the width it asked for -- see [`WRAP_SLACK`].
+                Some(DevicePixels(
+                    (bounds.size.width + WRAP_SLACK) * scale.factor(),
+                )),
                 label.colour,
                 device_clip,
                 label.align,

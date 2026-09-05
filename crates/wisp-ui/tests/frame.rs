@@ -598,3 +598,29 @@ fn nothing_outside_a_scrolling_box_is_drawn() {
         .expect("at least one");
     assert_eq!(clip.bottom().get(), 100.0, "cut at the box's own edge");
 }
+
+#[test]
+fn a_box_that_hugs_a_short_line_is_one_line_tall() {
+    let (mut ui, mut scene) = ui();
+    // A short phrase pushed to the right by a spacer, which is how a chat
+    // window draws what somebody asked.
+    let tree = row()
+        .size(Sizing::Fixed(720.0), Sizing::Hug)
+        .child(spacer())
+        .child(
+            row()
+                .size(Sizing::Hug, Sizing::Hug)
+                .padding(Edges::axes(8.0, 13.0))
+                .id("said")
+                .child(text("캐릭터는?", Role::Body, ink())),
+        );
+    let seen = ui.frame(&tree, (900.0, 400.0), Scale::ONE, &mut scene);
+    let said = seen.bounds("said").expect("laid out");
+
+    let one_line = Role::Body.size() * Role::Body.leading() + 16.0;
+    assert!(
+        (said.bottom() - said.top() - one_line).abs() < 2.0,
+        "a short phrase came out {:.0} tall, and one line is {one_line:.0}",
+        said.bottom() - said.top()
+    );
+}
