@@ -28,6 +28,16 @@ pub struct WindowOptions {
     /// top, and shadowless, and asks the scene on every frame whether there is
     /// anything under the pointer. macOS only so far.
     pub overlay: bool,
+    /// Whether the library decides what catches clicks, from what the frame
+    /// drew.
+    ///
+    /// True is right for anything made of boxes and text, which is what the
+    /// scene knows the shape of. It is wrong for a picture with holes in it: a
+    /// scene knows a sprite's rectangle and not which of its pixels are
+    /// transparent, so a character drawn on an empty canvas would catch clicks
+    /// in the corners of its own frame. Turn it off and set it from
+    /// [`Frame::overlay`] with whatever the application knows.
+    pub manage_click_through: bool,
     /// Check the overlay against the window server after a few frames, report,
     /// and quit.
     ///
@@ -46,6 +56,7 @@ impl Default for WindowOptions {
             transparent: true,
             decorated: true,
             overlay: false,
+            manage_click_through: true,
             selftest: false,
         }
     }
@@ -381,7 +392,8 @@ impl<F: FnMut(&mut Ui, &Frame<'_>) -> Element> ApplicationHandler for App<F> {
                 // receiving them, so the last event's position is wherever the
                 // pointer was when it stopped listening.
                 #[cfg(target_os = "macos")]
-                if let Some(overlay) = state.overlay.as_mut()
+                if self.options.manage_click_through
+                    && let Some(overlay) = state.overlay.as_mut()
                     && let (Some(cursor), Some(frame)) = (overlay.cursor(), overlay.frame())
                 {
                     let local = wisp_core::geometry::Point::new(
