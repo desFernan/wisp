@@ -52,13 +52,22 @@ impl Default for WindowOptions {
 }
 
 /// What the draw callback is told about the frame it is building.
-pub struct Frame {
+pub struct Frame<'a> {
     /// The drawable area, in device pixels.
     pub size: (u32, u32),
     /// Device pixels per point on the display this window is on.
     pub scale: Scale,
     /// Seconds since the window opened.
     pub elapsed: f32,
+    /// The platform window, when this is an overlay.
+    ///
+    /// Here because a window that follows its own content has to be able to
+    /// move itself, and only the frame that drew the content knows where it
+    /// went.
+    #[cfg(target_os = "macos")]
+    pub overlay: Option<&'a wisp_overlay::Overlay>,
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) _lifetime: std::marker::PhantomData<&'a ()>,
 }
 
 /// Opens a window and draws it until it is closed.
@@ -74,7 +83,7 @@ pub struct Frame {
 /// refresh is what judder is.
 pub fn run<F>(options: WindowOptions, build: F) -> Result<(), winit::error::EventLoopError>
 where
-    F: FnMut(&mut Ui, &Frame) -> Element + 'static,
+    F: FnMut(&mut Ui, &Frame<'_>) -> Element + 'static,
 {
     let event_loop = EventLoop::new()?;
     // Poll, not Wait: something is animating in the sort of window this
@@ -121,7 +130,7 @@ struct App<F> {
     checker: crate::selftest::Checker,
 }
 
-impl<F: FnMut(&mut Ui, &Frame) -> Element> App<F> {
+impl<F: FnMut(&mut Ui, &Frame<'_>) -> Element> App<F> {
     fn open(&mut self, event_loop: &ActiveEventLoop) -> Option<State> {
         let overlay = self.options.overlay;
         let attributes = Window::default_attributes()
@@ -213,7 +222,7 @@ impl<F: FnMut(&mut Ui, &Frame) -> Element> App<F> {
     }
 }
 
-impl<F: FnMut(&mut Ui, &Frame) -> Element> ApplicationHandler for App<F> {
+impl<F: FnMut(&mut Ui, &Frame<'_>) -> Element> ApplicationHandler for App<F> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.state.is_none() {
             self.state = self.open(event_loop);
@@ -341,6 +350,10 @@ impl<F: FnMut(&mut Ui, &Frame) -> Element> ApplicationHandler for App<F> {
                     size: (state.config.width, state.config.height),
                     scale,
                     elapsed: self.opened.elapsed().as_secs_f32(),
+                    #[cfg(target_os = "macos")]
+                    overlay: state.overlay.as_ref(),
+                    #[cfg(not(target_os = "macos"))]
+                    _lifetime: std::marker::PhantomData,
                 };
                 let root = (self.build)(&mut self.ui, &frame);
                 // Where the candidate list should appear. Left unset, macOS

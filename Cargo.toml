@@ -7,7 +7,13 @@ version = "0.0.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/desFernan/wisp"
+homepage = "https://github.com/desFernan/wisp"
 authors = ["desFernan"]
+# crates.io allows five, of twenty characters each. These are what somebody
+# with this problem would actually type into the search box.
+keywords = ["gui", "overlay", "gpu", "wgpu", "transparent"]
+categories = ["gui", "graphics", "rendering"]
+rust-version = "1.85"
 
 [workspace.dependencies]
 wisp-core = { path = "crates/wisp-core", version = "0.0.1" }

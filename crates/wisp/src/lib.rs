@@ -16,6 +16,8 @@ pub use wisp_core::colour::Rgba;
 pub use wisp_core::geometry::{Point, Rect, Size};
 pub use wisp_core::scene::{Background, Border, Corners, Masked, Quad, Scene, Shadow};
 pub use wisp_core::units::{DevicePixels, Points, Scale};
+#[cfg(target_os = "macos")]
+pub use wisp_overlay::{Overlay, SOLID};
 pub use wisp_text::{Align, Font, TextSystem, Weight};
 pub use wisp_ui::element::{
     Axis, Edges, Element, Place, Sizing, column, div, picture, row, spacer, text,
