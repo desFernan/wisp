@@ -139,20 +139,29 @@ pub struct Theme {
 impl Theme {
     /// The dark theme, and the default: a toolkit whose headline is a window
     /// over somebody's desktop should not be the brightest thing on it.
+    ///
+    /// The greys are warm, because the accent is. A palette whose neutrals
+    /// lean blue and whose one colour is orange is two palettes: every surface
+    /// quietly disagrees with the one thing on it that is meant to stand out,
+    /// and the result reads as cheap without it being obvious which colour is
+    /// at fault. See [`Theme::neutrals_lean_the_way_the_accent_does`].
     pub fn dark() -> Self {
         Self {
-            sunk: Rgba::hex(0x0d0d11),
-            base: Rgba::hex(0x16161c),
-            raised: Rgba::hex(0x21212a),
-            floating: Rgba::hex(0x2b2b36),
-            border: Rgba::hex(0x393947),
-            ink: Rgba::hex(0xe8e8f0),
-            quiet: Rgba::hex(0x9a9aa8),
-            accent: Rgba::hex(0xed8c33),
-            on_accent: Rgba::hex(0x1a1208),
-            success: Rgba::hex(0x3fb950),
-            danger: Rgba::hex(0xf85149),
-            warning: Rgba::hex(0xe3b341),
+            sunk: Rgba::hex(0x100d0b),
+            base: Rgba::hex(0x1a1613),
+            raised: Rgba::hex(0x251f1a),
+            floating: Rgba::hex(0x302822),
+            border: Rgba::hex(0x3e342c),
+            ink: Rgba::hex(0xf2ebe3),
+            quiet: Rgba::hex(0xa79a8e),
+            accent: Rgba::hex(0xe8862e),
+            on_accent: Rgba::hex(0x1b0f04),
+            // Status colours are picked to be recognised rather than to match:
+            // a green that has been warmed until it agrees with the greys is a
+            // green nobody reads as "fine".
+            success: Rgba::hex(0x5fa855),
+            danger: Rgba::hex(0xef5b45),
+            warning: Rgba::hex(0xe0a63a),
         }
     }
 
@@ -161,18 +170,21 @@ impl Theme {
             // A light theme runs out of headroom at white, so the steps below
             // it have to leave room rather than all of them being white and
             // relying on the shadow to tell them apart.
-            sunk: Rgba::hex(0xe9e9ef),
-            base: Rgba::hex(0xf4f4f8),
-            raised: Rgba::hex(0xfbfbfd),
-            floating: Rgba::hex(0xffffff),
-            border: Rgba::hex(0xd6d6de),
-            ink: Rgba::hex(0x1b1b22),
-            quiet: Rgba::hex(0x6b6b78),
-            accent: Rgba::hex(0xc96a13),
-            on_accent: Rgba::hex(0xfff6ec),
-            success: Rgba::hex(0x1a7f37),
-            danger: Rgba::hex(0xcf222e),
-            warning: Rgba::hex(0x9a6700),
+            sunk: Rgba::hex(0xebe6e0),
+            base: Rgba::hex(0xf6f2ec),
+            raised: Rgba::hex(0xfcfaf6),
+            // Not pure white: the top of a warm ramp is warm too, and a white
+            // card on warm paper is the one thing on the screen that looks
+            // blue.
+            floating: Rgba::hex(0xfffdfa),
+            border: Rgba::hex(0xdcd4ca),
+            ink: Rgba::hex(0x221c16),
+            quiet: Rgba::hex(0x6e6259),
+            accent: Rgba::hex(0xc2670f),
+            on_accent: Rgba::hex(0xfff6ea),
+            success: Rgba::hex(0x2c7a34),
+            danger: Rgba::hex(0xc63328),
+            warning: Rgba::hex(0x92600a),
         }
     }
 
@@ -261,6 +273,41 @@ mod tests {
                     let gap = (luma(text) - surface).abs();
                     assert!(gap > 0.15, "{name} on {at:?} differs by only {gap:.3}");
                 }
+            }
+        }
+    }
+
+    /// How far towards red a colour leans, against blue. Positive is warm.
+    fn lean(c: Rgba) -> f32 {
+        c.r - c.b
+    }
+
+    #[test]
+    fn neutrals_lean_the_way_the_accent_does() {
+        // The defect this catches does not look like a colour problem. Every
+        // grey is defensible on its own and so is the accent; it is only
+        // together that a blue-grey window with an orange button on it reads
+        // as two palettes stuck together.
+        //
+        // Status colours are exempt: they are picked to be recognised, and a
+        // green warmed until it agrees with the greys is not read as "fine".
+        for theme in [Theme::dark(), Theme::light()] {
+            let accent = lean(theme.accent);
+            for (name, colour) in [
+                ("sunk", theme.sunk),
+                ("base", theme.base),
+                ("raised", theme.raised),
+                ("floating", theme.floating),
+                ("border", theme.border),
+                ("ink", theme.ink),
+                ("quiet", theme.quiet),
+                ("on_accent", theme.on_accent),
+            ] {
+                assert!(
+                    lean(colour) * accent >= 0.0,
+                    "{name} leans {:.3} and the accent leans {accent:.3}",
+                    lean(colour)
+                );
             }
         }
     }
