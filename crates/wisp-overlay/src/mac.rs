@@ -222,6 +222,51 @@ impl Overlay {
     }
 }
 
+/// One step of a mouse gesture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseStep {
+    Down,
+    Move,
+    Up,
+}
+
+/// Posts one real mouse event at a point on the screen.
+///
+/// One event per call, and never a whole gesture in one: posting a gesture
+/// from the thread that draws blocks the loop for its duration, and every
+/// event is then handled in a burst afterwards -- which measures the event
+/// queue rather than the window, and reports a drag that moved nothing.
+///
+/// For checking a window's own behaviour. Nothing an application does in
+/// normal use should be posting input to itself.
+pub fn post_mouse(x: Points, y: Points, step: MouseStep) -> bool {
+    use objc2_core_graphics::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+
+    let point = objc2_core_foundation::CGPoint {
+        x: x.get() as f64,
+        y: y.get() as f64,
+    };
+    let kind = match step {
+        MouseStep::Down => CGEventType::LeftMouseDown,
+        MouseStep::Move => CGEventType::LeftMouseDragged,
+        MouseStep::Up => CGEventType::LeftMouseUp,
+    };
+    let Some(event) = CGEvent::new_mouse_event(None, kind, point, CGMouseButton::Left) else {
+        return false;
+    };
+    CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+    true
+}
+
+/// Whether this process may post synthetic input at all.
+///
+/// `CGEventPost` needs Accessibility, and a process without it has its events
+/// dropped in silence -- no error, no delivery. A check run in that state
+/// fails for the wrong reason, and its opposite passes for the wrong reason.
+pub fn can_post_events() -> bool {
+    objc2_core_graphics::CGPreflightPostEventAccess()
+}
+
 /// The height of the primary display, which every Cocoa coordinate is measured
 /// from.
 fn primary_height(mtm: MainThreadMarker) -> Option<f64> {
