@@ -17,6 +17,8 @@ struct Textured {
     uv: vec4<f32>,
     tint: vec4<f32>,
     clip: vec4<f32>,
+    // Rotation in radians, the pivot as a fraction of the box, and a spare.
+    turn: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -40,7 +42,20 @@ const CORNERS = array<vec2<f32>, 6>(
 fn vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> Vertex {
     let item = items[instance];
     let corner = CORNERS[vertex];
-    let point = item.bounds.xy + corner * item.bounds.zw;
+    var point = item.bounds.xy + corner * item.bounds.zw;
+
+    let radians = item.turn.x;
+    if (radians != 0.0) {
+        // About the pivot rather than the middle. Which corner a thing turns
+        // on is most of whether the movement reads as the right one: a
+        // character leaning into a walk turns about its feet, and about its
+        // middle it slides sideways into the floor.
+        let pivot = item.bounds.xy + item.turn.yz * item.bounds.zw;
+        let local = point - pivot;
+        let c = cos(radians);
+        let s = sin(radians);
+        point = pivot + vec2<f32>(local.x * c - local.y * s, local.x * s + local.y * c);
+    }
 
     var out: Vertex;
     out.clip = vec4<f32>(

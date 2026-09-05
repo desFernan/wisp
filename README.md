@@ -13,6 +13,14 @@ for.
 > transparent always-on-top windows that let clicks through wherever nothing is
 > drawn. See [Where this is](#where-this-is) for what is not here.
 
+![A chat window drawn by wisp](.github/media/chat.png)
+
+Every pixel of that is this library: the layout, the type scale and surface
+ramp, the rounded boxes, the text, and the caret sitting inside a Hangul
+syllable that is still being composed. It was not photographed from a screen --
+`cargo run --example shot` renders it to a PNG with no window at all, which is
+also how the renderer is tested.
+
 ```sh
 cargo run --example chat -p wisp      # a chat window, built out of the toolkit
 cargo run --example gallery -p wisp   # the type scale and the surface ramp
@@ -22,7 +30,7 @@ cargo run --example overlay -p wisp   # a card over your desktop that clicks fal
 `cargo run --example overlay -- --selftest` asks the window server whether the
 overlay behaves, and quits.
 
-62 tests.
+115 tests.
 
 ## Why another one
 
@@ -66,8 +74,9 @@ each of these bugs first:
 | the overlay: transparent, always on top, click-through per pixel | **done** on macOS — `wisp-overlay`, with a selftest that asks the window server rather than reading back its own flags |
 
 The milestone that decides whether any of this worked is porting a real desktop
-pet onto it. Until then the honest description is "a renderer with a window
-around it".
+pet onto it. Everything above is what that port needs and nothing above has
+carried one yet, so read the table as "written, tested, and not yet proven by
+the thing it was written for".
 
 ## How it fits together
 

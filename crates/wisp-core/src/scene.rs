@@ -320,6 +320,46 @@ pub struct Textured {
     /// Multiplied into the picture. White leaves it alone; anything else
     /// tints it, and the alpha fades it.
     pub tint: Rgba,
+    /// Clockwise, in radians.
+    pub rotation: f32,
+    /// What it turns about, as a fraction of its own box: `(0.5, 0.5)` is the
+    /// middle and `(0.5, 1.0)` the bottom edge.
+    ///
+    /// Which corner a thing pivots on is most of whether a rotation reads as
+    /// the right movement. A character leaning into a walk turns about its
+    /// feet; turned about its middle it slides sideways into the floor.
+    pub pivot: (f32, f32),
+}
+
+impl Textured {
+    /// Upright, untinted, unclipped.
+    pub fn new(bounds: Rect<DevicePixels>, uv: Rect<f32>) -> Self {
+        Self {
+            clip: None,
+            bounds,
+            uv,
+            tint: Rgba::new(1.0, 1.0, 1.0, 1.0),
+            rotation: 0.0,
+            pivot: (0.5, 0.5),
+        }
+    }
+
+    pub fn tinted(mut self, tint: Rgba) -> Self {
+        self.tint = tint;
+        self
+    }
+
+    /// Turned clockwise about `pivot`, given as a fraction of its own box.
+    pub fn turned(mut self, radians: f32, pivot: (f32, f32)) -> Self {
+        self.rotation = radians;
+        self.pivot = pivot;
+        self
+    }
+
+    pub fn clipped_to(mut self, clip: Option<Rect<DevicePixels>>) -> Self {
+        self.clip = clip;
+        self
+    }
 }
 
 /// One frame's worth of drawing, back to front.
@@ -442,6 +482,11 @@ impl Scene {
             // on the GPU. Its rectangle counts, which is right for an icon and
             // generous for a sprite drawn on a transparent canvas; a caller
             // that needs the difference gives the sprite a tighter box.
+            //
+            // A turned picture is tested against the box it turned *from*. The
+            // difference is a few degrees on anything an interface does with
+            // rotation, and testing the turned quad would mean the hit area
+            // moving while a character breathes.
             || self.textured.iter().any(|textured| {
                 solid(&textured.tint)
                     && textured.bounds.contains(point)

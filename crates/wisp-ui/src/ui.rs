@@ -426,17 +426,23 @@ impl Ui {
         }
 
         if let Some((picture, tint)) = element.picture {
-            scene.push_textured(wisp_core::scene::Textured {
-                clip: device_clip,
-                bounds: Rect::from_edges(
-                    DevicePixels(bounds.left() * scale.factor()),
-                    DevicePixels(bounds.top() * scale.factor()),
-                    DevicePixels(bounds.right() * scale.factor()),
-                    DevicePixels(bounds.bottom() * scale.factor()),
+            scene.push_textured(
+                wisp_core::scene::Textured::new(
+                    Rect::from_edges(
+                        DevicePixels(bounds.left() * scale.factor()),
+                        DevicePixels(bounds.top() * scale.factor()),
+                        DevicePixels(bounds.right() * scale.factor()),
+                        DevicePixels(bounds.bottom() * scale.factor()),
+                    ),
+                    picture.uv,
+                )
+                .tinted(tint)
+                .clipped_to(device_clip)
+                .turned(
+                    element.turn.map(|(r, _)| r).unwrap_or(0.0),
+                    element.turn.map(|(_, p)| p).unwrap_or((0.5, 0.5)),
                 ),
-                uv: picture.uv,
-                tint,
-            });
+            );
         }
 
         if let Some(label) = element.label.as_ref() {

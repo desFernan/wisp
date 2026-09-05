@@ -73,6 +73,8 @@ struct GpuTextured {
     uv: [f32; 4],
     tint: [f32; 4],
     clip: [f32; 4],
+    /// radians, pivot x, pivot y, unused
+    turn: [f32; 4],
 }
 
 /// One masked item, laid out to match `Masked` in `masked.wgsl`.
@@ -565,6 +567,7 @@ impl Renderer {
                 uv: [t.uv.left(), t.uv.top(), t.uv.right(), t.uv.bottom()],
                 tint: rgba(t.tint),
                 clip: clip_of(t.clip),
+                turn: [t.rotation, t.pivot.0, t.pivot.1, 0.0],
             })
             .collect();
         if pictures.len() as u64 > self.textured_capacity {

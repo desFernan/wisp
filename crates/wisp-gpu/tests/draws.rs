@@ -508,12 +508,13 @@ gpu_test!(a_picture_is_drawn_from_its_own_colours, h, {
         .upload_pictures(side, &pixels, Some((0, 0, side, side)));
 
     let mut scene = Scene::new();
-    scene.push_textured(wisp_core::Textured {
-        clip: None,
-        bounds: box_at(0.0, 0.0, 64.0, 64.0),
-        uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
-        tint: Rgba::hex(0xffffff),
-    });
+    scene.push_textured(
+        wisp_core::Textured::new(
+            box_at(0.0, 0.0, 64.0, 64.0),
+            Rect::from_edges(0.0, 0.0, 1.0, 1.0),
+        )
+        .tinted(Rgba::hex(0xffffff)),
+    );
     let pixels = h.draw(&scene);
 
     assert!(
@@ -532,12 +533,13 @@ gpu_test!(a_tint_multiplies_into_the_picture, h, {
         .upload_pictures(side, &[255, 255, 255, 255], Some((0, 0, side, side)));
 
     let mut scene = Scene::new();
-    scene.push_textured(wisp_core::Textured {
-        clip: None,
-        bounds: box_at(0.0, 0.0, 64.0, 64.0),
-        uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
-        tint: Rgba::hex(0xff0000),
-    });
+    scene.push_textured(
+        wisp_core::Textured::new(
+            box_at(0.0, 0.0, 64.0, 64.0),
+            Rect::from_edges(0.0, 0.0, 1.0, 1.0),
+        )
+        .tinted(Rgba::hex(0xff0000)),
+    );
     let pixels = h.draw(&scene);
     assert!(
         close(at(&pixels, 32, 32), [255, 0, 0, 255]),
@@ -561,13 +563,70 @@ gpu_test!(a_transparent_pixel_in_a_picture_stays_transparent, h, {
         .upload_pictures(side, &pixels, Some((0, 0, side, side)));
 
     let mut scene = Scene::new();
-    scene.push_textured(wisp_core::Textured {
-        clip: None,
-        bounds: box_at(0.0, 0.0, 64.0, 64.0),
-        uv: Rect::from_edges(0.0, 0.0, 1.0, 1.0),
-        tint: Rgba::hex(0xffffff),
-    });
+    scene.push_textured(
+        wisp_core::Textured::new(
+            box_at(0.0, 0.0, 64.0, 64.0),
+            Rect::from_edges(0.0, 0.0, 1.0, 1.0),
+        )
+        .tinted(Rgba::hex(0xffffff)),
+    );
     let pixels = h.draw(&scene);
     assert!(at(&pixels, 8, 8)[3] > 200, "the opaque quarter");
     assert_eq!(at(&pixels, 56, 56)[3], 0, "the empty quarter");
+});
+
+gpu_test!(a_turned_picture_turns_about_the_pivot_it_was_given, h, {
+    // A one pixel picture stretched into a tall thin bar, stood on the bottom
+    // edge of the frame and leaned. Turned about its middle it would swing
+    // both ends; turned about its foot only the top moves.
+    let side = 1u32;
+    h.renderer
+        .upload_pictures(side, &[255, 255, 255, 255], Some((0, 0, side, side)));
+    let uv = Rect::from_edges(0.0, 0.0, 1.0, 1.0);
+    let bar = box_at(30.0, 4.0, 34.0, 60.0);
+
+    let mut upright = Scene::new();
+    upright.push_textured(wisp_core::Textured::new(bar, uv));
+    let before = h.draw(&upright);
+
+    let mut leaned = Scene::new();
+    leaned.push_textured(wisp_core::Textured::new(bar, uv).turned(0.35, (0.5, 1.0)));
+    let after = h.draw(&leaned);
+
+    // The foot has not moved.
+    assert!(
+        before[(58 * SIZE + 32) as usize][3] > 100,
+        "the foot was drawn"
+    );
+    assert!(
+        after[(58 * SIZE + 32) as usize][3] > 100,
+        "the foot stayed put"
+    );
+    // The top has.
+    assert!(
+        before[(6 * SIZE + 32) as usize][3] > 100,
+        "the top was drawn"
+    );
+    assert_eq!(
+        after[(6 * SIZE + 32) as usize][3],
+        0,
+        "the top should have leaned away"
+    );
+});
+
+gpu_test!(a_rotation_of_nothing_changes_nothing, h, {
+    let side = 1u32;
+    h.renderer
+        .upload_pictures(side, &[255, 255, 255, 255], Some((0, 0, side, side)));
+    let uv = Rect::from_edges(0.0, 0.0, 1.0, 1.0);
+    let bar = box_at(16.0, 16.0, 48.0, 48.0);
+
+    let mut plain = Scene::new();
+    plain.push_textured(wisp_core::Textured::new(bar, uv));
+    let a = h.draw(&plain);
+
+    let mut turned = Scene::new();
+    turned.push_textured(wisp_core::Textured::new(bar, uv).turned(0.0, (0.5, 1.0)));
+    let b = h.draw(&turned);
+    assert_eq!(a, b);
 });

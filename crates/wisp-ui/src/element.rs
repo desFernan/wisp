@@ -140,6 +140,8 @@ pub struct Element {
     pub(crate) style: Style,
     pub(crate) label: Option<Label>,
     pub(crate) picture: Option<(crate::pictures::Picture, Rgba)>,
+    /// Radians clockwise and the pivot, as a fraction of the box.
+    pub(crate) turn: Option<(f32, (f32, f32))>,
     pub(crate) children: Vec<Element>,
 }
 
@@ -150,6 +152,7 @@ pub fn div() -> Element {
         style: Style::default(),
         label: None,
         picture: None,
+        turn: None,
         children: Vec::new(),
     }
 }
@@ -327,6 +330,17 @@ impl Element {
         if let Some((_, tint)) = self.picture.as_mut() {
             *tint = colour;
         }
+        self
+    }
+
+    /// Turns a picture clockwise about a point given as a fraction of its own
+    /// box: `(0.5, 1.0)` is the bottom edge.
+    ///
+    /// Only the drawing turns. Layout, hit testing and the click-through mask
+    /// all use the box it turned from, which is what keeps a hit area still
+    /// while something leans.
+    pub fn turn(mut self, radians: f32, pivot: (f32, f32)) -> Self {
+        self.turn = Some((radians, pivot));
         self
     }
 
