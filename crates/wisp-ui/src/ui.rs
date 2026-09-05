@@ -90,6 +90,12 @@ pub struct Ui {
     scrolls: HashMap<Id, f32>,
     /// Wheel movement since the last frame, in points.
     wheel: f32,
+    /// How long the window has been open, in seconds. The caret blinks
+    /// against it.
+    now: f32,
+    /// When the caret last had a reason to be solid -- an edit, a click, a
+    /// key. Typing that blinks out mid-word reads as dropped input.
+    caret_since: f32,
     /// The display scale of the frame being built, so that a picture can be
     /// measured at its own pixels while everything else is in points.
     scale: f32,
@@ -126,6 +132,8 @@ impl Ui {
             wheel: 0.0,
             released: false,
             closing: false,
+            now: 0.0,
+            caret_since: 0.0,
             scale: 1.0,
         }
     }
@@ -153,6 +161,22 @@ impl Ui {
     /// Where the pointer is and whether its button is down, in points.
     pub fn point(&mut self, pointer: Pointer) {
         self.pointer = pointer;
+    }
+
+    /// How long the window has been open. The caret blinks against this.
+    pub fn at_time(&mut self, seconds: f32) {
+        self.now = seconds;
+    }
+
+    /// Whether the caret is in the lit half of its blink.
+    ///
+    /// Timed from the last thing the user did rather than from the clock, so
+    /// every keystroke restarts it lit. That is what keeps typing from
+    /// flickering -- a caret that blinks out between two keystrokes reads as a
+    /// dropped one -- and it needs no separate "hold it solid" rule.
+    fn caret_lit(&self) -> bool {
+        const BLINK: f32 = 1.06;
+        ((self.now - self.caret_since) % BLINK) < BLINK / 2.0
     }
 
     /// Asks for the window to close after this frame.
@@ -738,6 +762,7 @@ impl Ui {
         if self.last.clicked(id) {
             self.focused = Some(name);
         }
+        self.aim(name, editor, role);
 
         let mut edited = Edited::default();
         if self.focused == Some(name) {
@@ -751,10 +776,18 @@ impl Ui {
         let mut line = row().gap(0.0).id(id).cross(Place::Centre);
 
         if editor.text().is_empty() && editor.preedit().text.is_empty() {
-            line = line.child(text(placeholder, role, quiet));
-            if focused {
+            // The caret goes first: it marks where the next letter will land,
+            // and in an empty field that is the very start. Put after the
+            // hint, it sits at the end of a sentence the user did not write
+            // and cannot delete, and typing makes it jump backwards past it.
+            //
+            // This is the same shape as the case below -- the text before the
+            // caret, the caret, the text after it -- with nothing before and
+            // the hint standing in for what comes after.
+            if focused && self.caret_lit() {
                 line = line.child(caret(theme, role));
             }
+            line = line.child(text(placeholder, role, quiet));
             return (line, edited);
         }
 
@@ -780,13 +813,71 @@ impl Ui {
                 line = line.child(text(content[..at].to_string(), role, theme.ink));
                 if focused && !editor.preedit().text.is_empty() {
                     line = line.child(composing(&editor.preedit().text, theme, role));
-                } else if focused {
+                } else if focused && self.caret_lit() {
                     line = line.child(caret(theme, role));
                 }
                 line = line.child(text(content[at..].to_string(), role, theme.ink));
             }
         }
         (line, edited)
+    }
+
+    /// Put the caret where it was clicked, and extend it while the button is
+    /// held.
+    ///
+    /// A field you can only reach the middle of by holding an arrow key is one
+    /// people retype the whole line in. The box is the one this field was
+    /// given last frame -- the frame the user was looking at when they aimed.
+    fn aim(&mut self, name: Id, editor: &mut Editor, role: Role) {
+        let Some(rect) = self.last.bounds_of(name) else {
+            return;
+        };
+        let inside = rect.contains(Point::new(self.pointer.at.0, self.pointer.at.1));
+        let began = self.pointer.down && !self.was_down;
+        let dragging = self.pointer.down && self.pressed_on == Some(name);
+        if !(began && inside) && !dragging {
+            return;
+        }
+        let at = self.index_at(editor.text(), self.pointer.at.0 - rect.left(), role);
+        // Pressing puts the caret down; holding and moving drags a selection
+        // out of where it was put.
+        editor.place(at, dragging && !began);
+        if began && inside {
+            self.focused = Some(name);
+        }
+        self.caret_since = self.now;
+    }
+
+    /// The grapheme boundary nearest a distance along a line of text.
+    ///
+    /// Nearest, not "the last one before": clicking in the right-hand half of
+    /// a letter means after it, which is what every text field does and what
+    /// makes clicking at the end of a word land at the end of the word.
+    fn index_at(&mut self, content: &str, x: f32, role: Role) -> usize {
+        use unicode_segmentation::UnicodeSegmentation;
+
+        if content.is_empty() || x <= 0.0 {
+            return 0;
+        }
+        let Some(scale) = Scale::new(self.scale) else {
+            return 0;
+        };
+        let font = role.font(scale);
+        let mut best = 0;
+        let mut nearest = f32::INFINITY;
+        for at in content
+            .grapheme_indices(true)
+            .map(|(at, _)| at)
+            .chain(std::iter::once(content.len()))
+        {
+            let (width, _) = self.text.measure(&content[..at], &font, None);
+            let away = (width.get() / scale.factor() - x).abs();
+            if away < nearest {
+                nearest = away;
+                best = at;
+            }
+        }
+        best
     }
 
     fn apply(
@@ -796,6 +887,7 @@ impl Ui {
         on_enter: OnEnter,
         mut edited: Edited,
     ) -> Edited {
+        self.caret_since = self.now;
         match input {
             Input::Ime(Composition::Preedit(text, cursor)) => {
                 editor.compose(text, cursor);
@@ -907,5 +999,195 @@ fn collect_scrollables(
     let children = tree.children(node).unwrap_or_default();
     for (child_node, child) in children.into_iter().zip(element.children.iter()) {
         collect_scrollables(tree, child_node, child, at, found, point);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The caret is a thin box with nothing written in it; the hint is text.
+    fn is_caret(element: &Element) -> bool {
+        element.label.is_none() && matches!(element.style.width, Sizing::Fixed(w) if w < 4.0)
+    }
+
+    fn wrote(element: &Element) -> Option<&str> {
+        element.label.as_ref().map(|l| l.text.as_str())
+    }
+
+    fn field_showing(text: &str) -> Element {
+        let mut ui = Ui::new();
+        ui.focused = Some(Id("composer"));
+        let mut editor = Editor::default();
+        editor.insert(text);
+        let (element, _) = ui.field(
+            "composer",
+            &mut editor,
+            &Theme::dark(),
+            Role::Body,
+            "Say something…",
+            OnEnter::Submit,
+        );
+        element
+    }
+
+    #[test]
+    fn the_caret_sits_where_the_first_letter_will_go_not_after_the_hint() {
+        let line = field_showing("");
+        let caret = line.children.iter().position(is_caret);
+        let hint = line
+            .children
+            .iter()
+            .position(|c| wrote(c) == Some("Say something…"));
+        assert!(
+            caret.is_some() && hint.is_some(),
+            "expected both to be drawn"
+        );
+        assert!(
+            caret < hint,
+            "the caret was drawn after the hint, so it marks the end of a \
+             sentence nobody typed"
+        );
+    }
+
+    #[test]
+    fn the_hint_gives_way_to_what_was_typed() {
+        let line = field_showing("hello");
+        assert!(
+            !line
+                .children
+                .iter()
+                .any(|c| wrote(c) == Some("Say something…")),
+            "the hint stayed once there was something to read"
+        );
+    }
+
+    #[test]
+    fn the_caret_follows_the_text_it_was_typed_after() {
+        let line = field_showing("hello");
+        let caret = line.children.iter().position(is_caret).expect("no caret");
+        let before = line.children.iter().position(|c| wrote(c) == Some("hello"));
+        assert_eq!(
+            before,
+            Some(caret - 1),
+            "the caret should sit just after what has been typed"
+        );
+    }
+}
+
+#[cfg(test)]
+mod aiming {
+    use super::*;
+
+    fn field_with(text: &str, pointer: Pointer, was_down: bool) -> (Ui, Editor) {
+        let mut ui = Ui::new();
+        ui.scale = 1.0;
+        let mut editor = Editor::new(text);
+        editor.move_home(false);
+        // The box this field had last frame: a hundred points wide, at the
+        // origin, which is what `aim` measures the click against.
+        ui.last
+            .boxes
+            .insert(Id("f"), Rect::from_edges(0.0, 0.0, 200.0, 20.0));
+        ui.pointer = pointer;
+        ui.was_down = was_down;
+        (ui, editor)
+    }
+
+    fn run(ui: &mut Ui, editor: &mut Editor) {
+        let _ = ui.field(
+            "f",
+            editor,
+            &Theme::dark(),
+            Role::Body,
+            "hint",
+            OnEnter::Submit,
+        );
+    }
+
+    #[test]
+    fn clicking_past_the_end_of_the_text_puts_the_caret_at_the_end() {
+        let down = Pointer {
+            at: (190.0, 10.0),
+            down: true,
+        };
+        let (mut ui, mut editor) = field_with("hello", down, false);
+        run(&mut ui, &mut editor);
+        assert_eq!(editor.caret(), "hello".len());
+    }
+
+    #[test]
+    fn clicking_at_the_left_edge_puts_the_caret_at_the_start() {
+        let down = Pointer {
+            at: (0.0, 10.0),
+            down: true,
+        };
+        let (mut ui, mut editor) = field_with("hello", down, false);
+        editor.move_end(false);
+        run(&mut ui, &mut editor);
+        assert_eq!(editor.caret(), 0);
+    }
+
+    #[test]
+    fn clicking_a_field_gives_it_the_keyboard() {
+        let down = Pointer {
+            at: (10.0, 10.0),
+            down: true,
+        };
+        let (mut ui, mut editor) = field_with("hello", down, false);
+        run(&mut ui, &mut editor);
+        assert_eq!(ui.focused, Some(Id("f")));
+    }
+
+    #[test]
+    fn a_click_outside_the_field_leaves_the_caret_alone() {
+        let down = Pointer {
+            at: (400.0, 10.0),
+            down: true,
+        };
+        let (mut ui, mut editor) = field_with("hello", down, false);
+        run(&mut ui, &mut editor);
+        assert_eq!(editor.caret(), 0);
+        assert_eq!(ui.focused, None);
+    }
+
+    #[test]
+    fn holding_and_moving_selects_from_where_the_press_landed() {
+        let press = Pointer {
+            at: (0.0, 10.0),
+            down: true,
+        };
+        let (mut ui, mut editor) = field_with("hello", press, false);
+        run(&mut ui, &mut editor);
+        assert_eq!(editor.selection(), None, "a press alone selects nothing");
+
+        // Still held, now further along: the caret moves and the anchor stays.
+        ui.pressed_on = Some(Id("f"));
+        ui.was_down = true;
+        ui.pointer = Pointer {
+            at: (190.0, 10.0),
+            down: true,
+        };
+        run(&mut ui, &mut editor);
+        assert_eq!(editor.selected(), "hello");
+    }
+
+    #[test]
+    fn the_blink_restarts_lit_from_the_last_keystroke() {
+        let mut ui = Ui::new();
+        ui.caret_since = 10.0;
+        ui.at_time(10.0);
+        assert!(ui.caret_lit(), "lit the instant something is typed");
+        ui.at_time(10.8);
+        assert!(!ui.caret_lit(), "off for the back half of the beat");
+        ui.at_time(11.2);
+        assert!(ui.caret_lit(), "and back on for the next one");
+
+        // Typing during the dark half turns it straight back on, which is the
+        // whole point of measuring from the keystroke.
+        ui.at_time(11.8);
+        assert!(!ui.caret_lit());
+        ui.caret_since = 11.8;
+        assert!(ui.caret_lit());
     }
 }

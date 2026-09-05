@@ -357,6 +357,7 @@ impl<F: FnMut(&mut Ui, &Frame<'_>) -> Element> ApplicationHandler for App<F> {
                 let scale = Scale::new(state.window.scale_factor() as f32).unwrap_or(Scale::ONE);
                 self.scene.clear();
                 self.ui.point(self.pointer);
+                self.ui.at_time(self.opened.elapsed().as_secs_f32());
                 let frame = Frame {
                     size: (state.config.width, state.config.height),
                     scale,
