@@ -432,6 +432,9 @@ impl<F: FnMut(&mut Ui, &Frame<'_>) -> Element> ApplicationHandler for App<F> {
                 // request lands after the surface has had this one.
                 state.renderer.queue().present(surface_texture);
                 self.drawn += 1;
+                if self.ui.closing() {
+                    event_loop.exit();
+                }
 
                 #[cfg(target_os = "macos")]
                 if self.options.selftest && self.drawn > 8 {

@@ -93,6 +93,8 @@ pub struct Ui {
     /// The display scale of the frame being built, so that a picture can be
     /// measured at its own pixels while everything else is in points.
     scale: f32,
+    /// Whether the application has asked to close.
+    closing: bool,
     /// Whether a click finished this frame, wherever it landed.
     ///
     /// Not the same question as which box was clicked: most of a window is
@@ -123,6 +125,7 @@ impl Ui {
             scrolls: HashMap::new(),
             wheel: 0.0,
             released: false,
+            closing: false,
             scale: 1.0,
         }
     }
@@ -150,6 +153,20 @@ impl Ui {
     /// Where the pointer is and whether its button is down, in points.
     pub fn point(&mut self, pointer: Pointer) {
         self.pointer = pointer;
+    }
+
+    /// Asks for the window to close after this frame.
+    ///
+    /// After, not during: the frame being built is still drawn, so whatever it
+    /// was about to say -- a last line of output, a report -- is on screen
+    /// rather than lost to the shutdown.
+    pub fn quit(&mut self) {
+        self.closing = true;
+    }
+
+    /// Whether the application has asked to close.
+    pub fn closing(&self) -> bool {
+        self.closing
     }
 
     /// The wheel turned, in points. Positive scrolls the content up, the way
