@@ -45,7 +45,7 @@ transparent one and ask the window server which window a click there would
 actually hit, which is an answer that crosses application boundaries and cannot
 be faked from inside.
 
-125 tests.
+126 tests.
 
 ## Why another one
 
