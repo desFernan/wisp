@@ -136,7 +136,7 @@ impl Pictures {
         let mut reader = decoder.read_info().ok()?;
         let mut buffer = vec![0; reader.output_buffer_size()];
         let info = reader.next_frame(&mut buffer).ok()?;
-        let rgba = match info.color_type {
+        let rgba: Vec<u8> = match info.color_type {
             png::ColorType::Rgba => buffer[..info.buffer_size()]
                 .as_chunks::<4>()
                 .0
