@@ -14,7 +14,7 @@
 
 use wisp_core::geometry::Point;
 use wisp_core::{DevicePixels, Points, Scale, Scene};
-use wisp_overlay::Overlay;
+use wisp_overlay::{MouseStep, Overlay};
 
 /// A point with something drawn on it and a point with nothing, in window
 /// points, or `None` if the frame is all one or the other.
@@ -129,19 +129,61 @@ impl Checker {
                     if through { "PASS" } else { "FAIL" },
                     !through
                 );
-                println!(
-                    "=== {} ===\n",
-                    if self.passed {
-                        "all checks passed"
-                    } else {
-                        "SOME CHECKS FAILED"
-                    }
+                if !crate::can_post_events() {
+                    println!(
+                        "4. a held button is visible without the window -> SKIP (not trusted \n   \
+                         for Accessibility, so this process cannot press one to find out)"
+                    );
+                    return Some(self.finish());
+                }
+                crate::post_mouse(
+                    on_screen(self.clear).0,
+                    on_screen(self.clear).1,
+                    MouseStep::Down,
                 );
-                return Some(self.passed);
+            }
+            3 => {
+                // The press went to whatever is under a see-through pixel, so
+                // this window was never told about it. That is the point: a
+                // window that moves out from under a gesture still has to know
+                // the gesture is running.
+                let held = crate::mouse_is_down();
+                self.passed &= held;
+                println!(
+                    "4. a held button is visible without the window        -> {} (held={held})",
+                    if held { "PASS" } else { "FAIL" }
+                );
+                crate::post_mouse(
+                    on_screen(self.clear).0,
+                    on_screen(self.clear).1,
+                    MouseStep::Up,
+                );
+            }
+            4 => {
+                let let_go = !crate::mouse_is_down();
+                self.passed &= let_go;
+                println!(
+                    "5. and letting go is visible too                      -> {} (held={})",
+                    if let_go { "PASS" } else { "FAIL" },
+                    !let_go
+                );
+                return Some(self.finish());
             }
             _ => return Some(self.passed),
         }
         self.step += 1;
         None
+    }
+
+    fn finish(&self) -> bool {
+        println!(
+            "=== {} ===\n",
+            if self.passed {
+                "all checks passed"
+            } else {
+                "SOME CHECKS FAILED"
+            }
+        );
+        self.passed
     }
 }

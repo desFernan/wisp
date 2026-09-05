@@ -18,7 +18,7 @@
 mod mac;
 
 #[cfg(target_os = "macos")]
-pub use mac::{MouseStep, Overlay, can_post_events, post_mouse};
+pub use mac::{MouseStep, Overlay, can_post_events, mouse_is_down, post_mouse};
 
 /// How solid a pixel has to be before it catches a click.
 ///

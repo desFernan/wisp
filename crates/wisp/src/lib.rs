@@ -17,7 +17,7 @@ pub use wisp_core::geometry::{Point, Rect, Size};
 pub use wisp_core::scene::{Background, Border, Corners, Masked, Quad, Scene, Shadow};
 pub use wisp_core::units::{DevicePixels, Points, Scale};
 #[cfg(target_os = "macos")]
-pub use wisp_overlay::{MouseStep, Overlay, SOLID, can_post_events, post_mouse};
+pub use wisp_overlay::{MouseStep, Overlay, SOLID, can_post_events, mouse_is_down, post_mouse};
 pub use wisp_text::{Align, Font, TextSystem, Weight};
 pub use wisp_ui::element::{
     Axis, Edges, Element, Place, Sizing, column, div, picture, row, spacer, text,

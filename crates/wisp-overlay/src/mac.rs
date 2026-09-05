@@ -263,6 +263,24 @@ pub fn post_mouse(x: Points, y: Points, step: MouseStep) -> bool {
     true
 }
 
+/// Whether the primary mouse button is down, anywhere on the screen.
+///
+/// Asked of the window server, like [`Overlay::cursor`], and for the same
+/// reason. A window is only told about a gesture while the pointer is over it,
+/// so a window that moves itself to follow what is being dragged can move out
+/// from under the very gesture moving it: the press arrives, nothing after it
+/// does, and the thing being dragged is never let go of. Something that moves
+/// its own window has to hear "still held" from somewhere that is not the
+/// window.
+///
+/// This reads state rather than watching events, so it needs no Accessibility
+/// grant -- unlike [`post_mouse`], which asks to *make* events.
+pub fn mouse_is_down() -> bool {
+    // Bit zero is the left button, whichever physical button that is: the
+    // system has already applied the user's handedness setting by here.
+    NSEvent::pressedMouseButtons() & 1 != 0
+}
+
 /// Whether this process may post synthetic input at all.
 ///
 /// `CGEventPost` needs Accessibility, and a process without it has its events
