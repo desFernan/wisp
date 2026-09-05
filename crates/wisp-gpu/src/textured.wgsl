@@ -78,7 +78,8 @@ fn fragment(in: Vertex) -> @location(0) vec4<f32> {
         discard;
     }
     let picked = textureSample(picture, picture_sampler, in.uv);
-    // The atlas holds straight alpha; the frame is composited premultiplied.
-    let alpha = picked.a * item.tint.a;
-    return vec4<f32>(picked.rgb * item.tint.rgb * alpha, alpha);
+    // The atlas is premultiplied and so is the frame, so the colour is already
+    // scaled by its own alpha and only the tint has to be applied: its colour
+    // to the colour, and its alpha to both.
+    return vec4<f32>(picked.rgb * item.tint.rgb * item.tint.a, picked.a * item.tint.a);
 }

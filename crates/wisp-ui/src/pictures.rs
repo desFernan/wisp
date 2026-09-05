@@ -72,8 +72,14 @@ impl Pictures {
         self.by_name.get(name).copied()
     }
 
-    /// Adds straight-alpha RGBA pixels under a name, or returns the one
+    /// Adds **premultiplied** RGBA pixels under a name, or returns the one
     /// already there.
+    ///
+    /// Premultiplied because the whole frame is composited that way, and a
+    /// picture that is not would have a dark fringe wherever it is
+    /// semi-transparent -- which for a character drawn on an empty canvas is
+    /// its entire outline. [`Self::add_png`] does the multiply for callers
+    /// coming from a file.
     ///
     /// `None` when the atlas is full. Full is a real state rather than an
     /// error: the caller draws without that picture for now and asks for a
@@ -131,7 +137,21 @@ impl Pictures {
         let mut buffer = vec![0; reader.output_buffer_size()];
         let info = reader.next_frame(&mut buffer).ok()?;
         let rgba = match info.color_type {
-            png::ColorType::Rgba => buffer[..info.buffer_size()].to_vec(),
+            png::ColorType::Rgba => buffer[..info.buffer_size()]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .flat_map(|p| {
+                    // PNG stores straight alpha; the atlas holds premultiplied.
+                    let a = p[3] as u16;
+                    [
+                        (p[0] as u16 * a / 255) as u8,
+                        (p[1] as u16 * a / 255) as u8,
+                        (p[2] as u16 * a / 255) as u8,
+                        p[3],
+                    ]
+                })
+                .collect(),
             png::ColorType::Rgb => buffer[..info.buffer_size()]
                 .as_chunks::<3>()
                 .0

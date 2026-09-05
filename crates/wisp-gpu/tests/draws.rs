@@ -630,3 +630,25 @@ gpu_test!(a_rotation_of_nothing_changes_nothing, h, {
     let b = h.draw(&turned);
     assert_eq!(a, b);
 });
+
+gpu_test!(a_half_transparent_picture_keeps_its_colour, h, {
+    // The atlas is premultiplied, so a half-transparent white is 128 in every
+    // channel. Treated as straight alpha it would come out half as bright as
+    // it should, which for a character drawn on an empty canvas is its whole
+    // outline going grey.
+    let side = 1u32;
+    h.renderer
+        .upload_pictures(side, &[128, 128, 128, 128], Some((0, 0, side, side)));
+
+    let mut scene = Scene::new();
+    scene.push_textured(wisp_core::Textured::new(
+        box_at(0.0, 0.0, 64.0, 64.0),
+        Rect::from_edges(0.0, 0.0, 1.0, 1.0),
+    ));
+    let pixels = h.draw(&scene);
+    let got = at(&pixels, 32, 32);
+    assert!((got[3] as i16 - 128).abs() <= 4, "alpha came back {}", got[3]);
+    // Over a transparent clear the composited result is the premultiplied
+    // colour itself.
+    assert!((got[0] as i16 - 128).abs() <= 6, "colour came back {}", got[0]);
+});
