@@ -45,7 +45,7 @@ transparent one and ask the window server which window a click there would
 actually hit, which is an answer that crosses application boundaries and cannot
 be faked from inside.
 
-115 tests.
+125 tests.
 
 ## Why another one
 
@@ -88,10 +88,18 @@ each of these bugs first:
 | pictures | **done** — an atlas for avatars, icons and sprites, tinted on the way out so one white icon serves every colour |
 | the overlay: transparent, always on top, click-through per pixel | **done** on macOS — `wisp-overlay`, with a selftest that asks the window server rather than reading back its own flags |
 
-The milestone that decides whether any of this worked is porting a real desktop
-pet onto it. Everything above is what that port needs and nothing above has
-carried one yet, so read the table as "written, tested, and not yet proven by
-the thing it was written for".
+The milestone that decides whether any of this worked is porting a real
+desktop pet onto it. That port is under way rather than pending: the Rust
+rewrite of Puck draws both its character and its chat window with wisp, and
+dropped gpui to do it. gpui floors an image's origin and ceils its size, so a
+character moving a third of a pixel had to be composited on the CPU and handed
+over as a finished bitmap every frame; wisp places images at sub-pixel offsets
+and rotates them about a pivot in the vertex shader, which deleted that
+compositor rather than replacing it.
+
+So the table is being proven by the thing it was written for, and is not
+finished being proven: that rewrite has not shipped, and until it does nothing
+here has been through a release with users on the other end of it.
 
 ## How it fits together
 
